@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "retailops-cli"
+version = "0.1.0"
+description = "Standalone command-line client for the RetailOps REST API"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "RetailOps" },
+]
+keywords = ["retailops", "cli", "retail", "inventory", "orders", "api"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "typer>=0.12,<0.26",
+    "httpx>=0.28,<1.0",
+    "tomli-w>=1.0,<2.0",
+    "pyyaml>=6.0,<7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/jp72924/retailops-cli"
+Repository = "https://github.com/jp72924/retailops-cli"
+Issues = "https://github.com/jp72924/retailops-cli/issues"
+Documentation = "https://github.com/jp72924/retailops-cli#readme"
+
+[project.scripts]
+retailops-cli = "retailops_cli.__main__:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-httpx>=0.30",
+    "pytest-mock>=3.14",
+    "coverage>=7.0",
+    "build>=1.2",
+    "twine>=5.0",
+    "ruff>=0.8",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["retailops_cli*"]
