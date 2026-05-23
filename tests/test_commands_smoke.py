@@ -9,22 +9,27 @@ Each test invokes the Typer app via ``CliRunner`` and asserts exit code 0
 plus a domain-specific marker in the help output.
 """
 
-from __future__ import annotations
-
-import os
-
 import pytest
-import typer.rich_utils as typer_rich_utils
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from retailops_cli.__main__ import app
 
 
-# Keep Rich/Typer help rendering deterministic on narrow CI terminals.
-os.environ["COLUMNS"] = "200"
-typer_rich_utils.MAX_WIDTH = 200
-
 runner = CliRunner()
+click_app = get_command(app)
+
+
+def option_names(*path: str) -> set[str]:
+    command = click_app
+    for part in path:
+        command = command.commands[part]
+
+    names: set[str] = set()
+    for param in command.params:
+        names.update(getattr(param, "opts", ()))
+        names.update(getattr(param, "secondary_opts", ()))
+    return names
 
 
 # ── root + bare-help ──────────────────────────────────────────────────────────
@@ -152,6 +157,7 @@ def test_leaf_command_help_does_not_crash(path):
 def test_settings_update_lists_secondary_currency_flags():
     r = runner.invoke(app, ["settings", "update", "--help"])
     assert r.exit_code == 0
+    options = option_names("settings", "update")
     for flag in [
         "--secondary-enabled",
         "--secondary-code",
@@ -159,31 +165,34 @@ def test_settings_update_lists_secondary_currency_flags():
         "--secondary-decimal-places",
         "--secondary-rate",
     ]:
-        assert flag in r.stdout, f"missing flag in `settings update`: {flag}"
+        assert flag in options, f"missing flag in `settings update`: {flag}"
 
 
 def test_customers_create_lists_extended_fields():
     r = runner.invoke(app, ["customers", "create", "--help"])
     assert r.exit_code == 0
+    options = option_names("customers", "create")
     for flag in ["--national-id", "--dob", "--gender", "--address-line-2", "--user-id"]:
-        assert flag in r.stdout, f"missing flag in `customers create`: {flag}"
+        assert flag in options, f"missing flag in `customers create`: {flag}"
 
 
 def test_customers_update_lists_extended_fields():
     r = runner.invoke(app, ["customers", "update", "--help"])
     assert r.exit_code == 0
+    options = option_names("customers", "update")
     for flag in ["--national-id", "--dob", "--gender", "--address-line-2", "--user-id"]:
-        assert flag in r.stdout, f"missing flag in `customers update`: {flag}"
+        assert flag in options, f"missing flag in `customers update`: {flag}"
 
 
 def test_products_list_has_unit_and_active_inactive_flags():
     r = runner.invoke(app, ["products", "list", "--help"])
     assert r.exit_code == 0
-    assert "--unit" in r.stdout
-    assert "--active" in r.stdout
-    assert "--inactive" in r.stdout
+    options = option_names("products", "list")
+    assert "--unit" in options
+    assert "--active" in options
+    assert "--inactive" in options
     # The old --all-statuses must be gone (it was renamed in Phase 2).
-    assert "--all-statuses" not in r.stdout
+    assert "--all-statuses" not in options
 
 
 def test_products_create_update_list_image_flags():
@@ -191,13 +200,15 @@ def test_products_create_update_list_image_flags():
     update_help = runner.invoke(app, ["products", "update", "--help"])
     assert create_help.exit_code == 0
     assert update_help.exit_code == 0
+    create_options = option_names("products", "create")
+    update_options = option_names("products", "update")
     for flag in ["--image", "--external-image-url"]:
-        assert flag in create_help.stdout
-        assert flag in update_help.stdout
+        assert flag in create_options
+        assert flag in update_options
     # Rich may truncate very long option names in narrow terminals; behavior
     # coverage for --clear-external-image-url lives in test_modern_cli_api_parity.
     for flag in ["--clear-image"]:
-        assert flag in update_help.stdout
+        assert flag in update_options
 
 
 def test_payments_modern_flags_are_advertised():
@@ -207,24 +218,28 @@ def test_payments_modern_flags_are_advertised():
     assert list_help.exit_code == 0
     assert record_help.exit_code == 0
     assert verify_help.exit_code == 0
+    list_options = option_names("payments", "list")
+    record_options = option_names("payments", "record")
+    verify_options = option_names("payments", "verify-receipt")
     for flag in ["--has-receipt", "--bank", "--status", "--payment-method"]:
-        assert flag in list_help.stdout
+        assert flag in list_options
     for flag in ["--receipt-image", "--ocr-data", "--transaction-key", "--origin-bank"]:
-        assert flag in record_help.stdout
+        assert flag in record_options
     for flag in ["--expected-amount-usd", "--expected-reference", "--expected-origin-bank"]:
-        assert flag in verify_help.stdout
+        assert flag in verify_options
 
 
 def test_settings_update_lists_ocr_flags():
     r = runner.invoke(app, ["settings", "update", "--help"])
     assert r.exit_code == 0
+    options = option_names("settings", "update")
     for flag in [
         "--ocr-enabled",
         "--ocr-base-url",
         "--ocr-api-key",
         "--clear-ocr-api-key",
     ]:
-        assert flag in r.stdout
+        assert flag in options
 
 
 # ── Phase 5 flag presence checks ──────────────────────────────────────────────
@@ -233,7 +248,7 @@ def test_settings_update_lists_ocr_flags():
 def test_root_help_advertises_dry_run_and_yaml_output():
     r = runner.invoke(app, ["--help"])
     assert r.exit_code == 0
-    assert "--dry-run" in r.stdout
+    assert "--dry-run" in option_names()
     # The output-format help line must mention yaml.
     assert "yaml" in r.stdout
 
