@@ -11,11 +11,16 @@ plus a domain-specific marker in the help output.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from typer.testing import CliRunner
 
 from retailops_cli.__main__ import app
 
+
+# Keep Rich/Typer help rendering deterministic on narrow CI terminals.
+os.environ["COLUMNS"] = "200"
 
 runner = CliRunner()
 
