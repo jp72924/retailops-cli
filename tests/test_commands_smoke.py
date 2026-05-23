@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 
 import pytest
+import typer.rich_utils as typer_rich_utils
 from typer.testing import CliRunner
 
 from retailops_cli.__main__ import app
@@ -21,6 +22,7 @@ from retailops_cli.__main__ import app
 
 # Keep Rich/Typer help rendering deterministic on narrow CI terminals.
 os.environ["COLUMNS"] = "200"
+typer_rich_utils.MAX_WIDTH = 200
 
 runner = CliRunner()
 
