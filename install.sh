@@ -60,6 +60,49 @@ PY
   return 1
 }
 
+run_pipx() {
+  if "$PYTHON_BIN" -m pipx --version >/dev/null 2>&1; then
+    "$PYTHON_BIN" -m pipx "$@"
+  elif command -v pipx >/dev/null 2>&1; then
+    pipx "$@"
+  else
+    return 127
+  fi
+}
+
+install_pipx() {
+  echo "Installing pipx..."
+
+  if command -v apt-get >/dev/null 2>&1; then
+    if [ "$(id -u)" -eq 0 ]; then
+      apt-get update
+      apt-get install -y pipx
+      return 0
+    fi
+
+    if command -v sudo >/dev/null 2>&1; then
+      sudo apt-get update
+      sudo apt-get install -y pipx
+      return 0
+    fi
+  fi
+
+  if "$PYTHON_BIN" -m pip install --user pipx; then
+    return 0
+  fi
+
+  cat >&2 <<'EOF'
+
+Could not install pipx automatically.
+
+On Ubuntu/Debian, install it with:
+  sudo apt-get update && sudo apt-get install -y pipx
+
+Then rerun this installer.
+EOF
+  return 1
+}
+
 PYTHON_BIN="$(find_python || true)"
 if [ -z "$PYTHON_BIN" ]; then
   echo "RetailOps CLI requires Python 3.11 or newer." >&2
@@ -67,12 +110,11 @@ if [ -z "$PYTHON_BIN" ]; then
   exit 1
 fi
 
-if ! "$PYTHON_BIN" -m pipx --version >/dev/null 2>&1; then
-  echo "Installing pipx..."
-  "$PYTHON_BIN" -m pip install --user pipx
+if ! run_pipx --version >/dev/null 2>&1; then
+  install_pipx
 fi
 
-"$PYTHON_BIN" -m pipx ensurepath
+run_pipx ensurepath
 
 SPEC="git+$REPO_URL"
 if [ -n "$REF" ]; then
@@ -80,7 +122,7 @@ if [ -n "$REF" ]; then
 fi
 
 echo "Installing RetailOps CLI from $SPEC ..."
-"$PYTHON_BIN" -m pipx install --force "$SPEC"
+run_pipx install --force "$SPEC"
 
 if [ "$INSTALL_COMPLETION" -eq 1 ] && command -v retailops-cli >/dev/null 2>&1; then
   retailops-cli --install-completion || true
