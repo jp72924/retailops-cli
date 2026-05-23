@@ -70,19 +70,27 @@ run_pipx() {
   fi
 }
 
+apt_install() {
+  if [ "$(id -u)" -eq 0 ]; then
+    apt-get update
+    apt-get install -y "$@"
+    return 0
+  fi
+
+  if command -v sudo >/dev/null 2>&1; then
+    sudo apt-get update
+    sudo apt-get install -y "$@"
+    return 0
+  fi
+
+  return 1
+}
+
 install_pipx() {
   echo "Installing pipx..."
 
   if command -v apt-get >/dev/null 2>&1; then
-    if [ "$(id -u)" -eq 0 ]; then
-      apt-get update
-      apt-get install -y pipx
-      return 0
-    fi
-
-    if command -v sudo >/dev/null 2>&1; then
-      sudo apt-get update
-      sudo apt-get install -y pipx
+    if apt_install pipx; then
       return 0
     fi
   fi
@@ -103,6 +111,28 @@ EOF
   return 1
 }
 
+ensure_git() {
+  if command -v git >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Installing git..."
+  if command -v apt-get >/dev/null 2>&1 && apt_install git; then
+    return 0
+  fi
+
+  cat >&2 <<'EOF'
+
+RetailOps CLI is installed from GitHub, so this installer needs git.
+
+On Ubuntu/Debian, install it with:
+  sudo apt-get update && sudo apt-get install -y git
+
+Then rerun this installer.
+EOF
+  return 1
+}
+
 PYTHON_BIN="$(find_python || true)"
 if [ -z "$PYTHON_BIN" ]; then
   echo "RetailOps CLI requires Python 3.11 or newer." >&2
@@ -114,6 +144,7 @@ if ! run_pipx --version >/dev/null 2>&1; then
   install_pipx
 fi
 
+ensure_git
 run_pipx ensurepath
 
 SPEC="git+$REPO_URL"
