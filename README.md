@@ -43,7 +43,7 @@ Then try a read-only command:
 ```bash
 retailops-cli dashboard
 retailops-cli products list --stock low
-retailops-cli orders list --page-size 10
+retailops-cli orders list --page 1
 ```
 
 ## Common Commands
