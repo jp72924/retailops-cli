@@ -10,3 +10,4 @@ yes: bool = False            # skip confirmation prompts
 verbose: bool = False        # print raw HTTP traffic to stderr
 dry_run: bool = False        # mutating commands: preview the request, do not send
 page_size: int = 25          # default page size for list commands
+page_size_explicit: bool = False  # True when --page-size was actually passed

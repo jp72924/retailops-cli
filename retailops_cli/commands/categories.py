@@ -19,7 +19,7 @@ import typer
 
 from .. import state
 from ..config import get_profile
-from ..errors import RetailOpsError, abort, handle_error, handle_connection_error
+from ..errors import RetailOpsError, confirm_or_abort, handle_error, handle_connection_error
 from ..output import console, print_success, render
 from ..pager import fetch_all, paginated_get
 
@@ -51,7 +51,7 @@ def list_categories(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt, columns=["id", "name", "display_name", "parent_category", "created_at"])
@@ -72,7 +72,7 @@ def get(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt)
@@ -99,7 +99,7 @@ def create(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"Category '{data['name']}' created (id={data['id']}).")
@@ -131,7 +131,7 @@ def update(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"Category {id} updated.")
@@ -145,17 +145,14 @@ def delete(
     id: int = typer.Argument(..., help="Category ID."),
 ) -> None:
     """Delete a category. Requires Manager role. Blocked if the category has products."""
-    if not state.yes:
-        confirmed = typer.confirm(f"Delete category {id}?", default=False)
-        if not confirmed:
-            abort()
+    confirm_or_abort(f"Delete category {id}?")
     try:
         with _client() as client:
             client.delete(f"categories/{id}/")
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"Category {id} deleted.")

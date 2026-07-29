@@ -21,8 +21,8 @@ import typer
 
 from .. import state
 from ..config import get_profile
-from ..errors import RetailOpsError, handle_error, handle_connection_error
-from ..output import err_console, print_dry_run, print_success, read_json_arg, render, render_partial_success
+from ..errors import RetailOpsError, confirm_or_abort, handle_error, handle_connection_error
+from ..output import err_console, print_success, read_json_arg, render, render_partial_success
 from ..pager import fetch_all, paginated_get
 
 app = typer.Typer(no_args_is_help=True)
@@ -66,7 +66,7 @@ def list_movements(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt, columns=[
@@ -90,7 +90,7 @@ def get(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt)
@@ -126,17 +126,10 @@ def adjust(
 
     body = {"product_id": product_id, "quantity": quantity, "notes": notes}
 
-    if state.dry_run:
-        print_dry_run("POST", "inventory/adjust/", body)
-        return
-
-    if not state.yes:
-        if not typer.confirm(
-            f"Record adjustment of {quantity:+d} units for product {product_id}?",
-            default=True,
-        ):
-            from ..errors import abort
-            abort()
+    confirm_or_abort(
+        f"Record adjustment of {quantity:+d} units for product {product_id}?",
+        default=True,
+    )
 
     try:
         with _client() as client:
@@ -144,7 +137,7 @@ def adjust(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
 
@@ -202,10 +195,6 @@ def bulk_adjust(
         )
         raise typer.Exit(1)
 
-    if state.dry_run:
-        print_dry_run("POST", "inventory/bulk-adjust/", {"adjustments": parsed})
-        return
-
     fmt = output or state.output
     try:
         with _client() as client:
@@ -213,7 +202,7 @@ def bulk_adjust(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render_partial_success(data, fmt, succeeded_columns=_BULK_COLUMNS)

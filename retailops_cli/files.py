@@ -7,7 +7,7 @@ Small file helpers for commands that send multipart uploads.
 from __future__ import annotations
 
 import mimetypes
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
@@ -49,15 +49,3 @@ def multipart_file(
                 content_type or guess_mime_type(resolved),
             )
         }
-
-
-@contextmanager
-def multipart_files(paths: dict[str, str]) -> Iterator[dict]:
-    """Open several files and yield an httpx-compatible files mapping."""
-    with ExitStack() as stack:
-        files = {}
-        for field_name, raw_path in paths.items():
-            resolved = resolve_file(raw_path, label=field_name)
-            handle = stack.enter_context(resolved.open("rb"))
-            files[field_name] = (resolved.name, handle, guess_mime_type(resolved))
-        yield files

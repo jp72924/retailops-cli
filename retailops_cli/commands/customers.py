@@ -19,8 +19,8 @@ import typer
 
 from .. import state
 from ..config import get_profile
-from ..errors import RetailOpsError, abort, handle_error, handle_connection_error
-from ..output import console, print_dry_run, print_success, render
+from ..errors import RetailOpsError, confirm_or_abort, handle_error, handle_connection_error
+from ..output import console, print_success, render
 from ..pager import fetch_all, paginated_get
 
 app = typer.Typer(no_args_is_help=True)
@@ -51,7 +51,7 @@ def list_customers(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt, columns=["id", "full_name", "email", "phone", "city", "country", "created_at"])
@@ -72,7 +72,7 @@ def get(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt)
@@ -123,7 +123,7 @@ def create(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"Customer '{data['full_name']}' created (id={data['id']}).")
@@ -176,7 +176,7 @@ def update(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"Customer {id} updated.")
@@ -190,19 +190,14 @@ def delete(
     id: int = typer.Argument(..., help="Customer ID."),
 ) -> None:
     """Delete a customer. Blocked if the customer has any associated orders."""
-    if state.dry_run:
-        print_dry_run("DELETE", f"customers/{id}/")
-        return
-    if not state.yes:
-        if not typer.confirm(f"Delete customer {id}? This cannot be undone.", default=False):
-            abort()
+    confirm_or_abort(f"Delete customer {id}? This cannot be undone.")
     try:
         with _client() as client:
             client.delete(f"customers/{id}/")
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"Customer {id} deleted.")

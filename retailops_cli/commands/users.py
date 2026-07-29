@@ -21,8 +21,8 @@ import typer
 
 from .. import state
 from ..config import get_profile
-from ..errors import RetailOpsError, abort, handle_error, handle_connection_error
-from ..output import console, print_dry_run, print_success, render
+from ..errors import RetailOpsError, confirm_or_abort, handle_error, handle_connection_error
+from ..output import console, print_success, render
 from ..pager import fetch_all, paginated_get
 
 app = typer.Typer(no_args_is_help=True)
@@ -37,7 +37,7 @@ def _client():
 
 @app.command(name="list")
 def list_users(
-    search:   Optional[str] = typer.Option(None,  "--search",   "-s"),
+    search:   Optional[str] = typer.Option(None,  "--search",   "-s", help="Search email or name."),
     ordering: Optional[str] = typer.Option(None,  "--ordering", "-O", help="e.g. email or -created_at"),
     page:     int            = typer.Option(1,     "--page",     "-p"),
     all_:     bool           = typer.Option(False, "--all",            is_flag=True),
@@ -53,7 +53,7 @@ def list_users(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt, columns=["id", "email", "first_name", "last_name", "role_name", "is_active", "created_at"])
@@ -74,7 +74,7 @@ def get(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt)
@@ -116,7 +116,7 @@ def create(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"User '{data['email']}' created (id={data['id']}).")
@@ -154,7 +154,7 @@ def update(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"User {id} updated.")
@@ -183,7 +183,7 @@ def passwd(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(data.get("detail", f"Password updated for user {id}."))
@@ -196,19 +196,14 @@ def deactivate(
     id: int = typer.Argument(..., help="User ID."),
 ) -> None:
     """Deactivate a user account (Admin only). Cannot deactivate your own account."""
-    if state.dry_run:
-        print_dry_run("POST", f"users/{id}/deactivate/")
-        return
-    if not state.yes:
-        if not typer.confirm(f"Deactivate user {id}? They will no longer be able to log in.", default=False):
-            abort()
+    confirm_or_abort(f"Deactivate user {id}? They will no longer be able to log in.")
     try:
         with _client() as client:
             data = client.post(f"users/{id}/deactivate/")
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(data.get("detail", f"User {id} deactivated."))
@@ -225,7 +220,7 @@ def reactivate(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(data.get("detail", f"User {id} reactivated."))

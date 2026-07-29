@@ -146,3 +146,71 @@ def test_fetch_all_warns_above_threshold(client, httpx_mock, capsys):
     assert "Fetching large dataset" in captured.out or "Fetching large dataset" in captured.err
     assert merged["count"] == 600
     assert len(merged["results"]) == 600
+
+
+def test_fetch_all_warns_only_once(client, httpx_mock, capsys):
+    """
+    The threshold stays crossed for every remaining page, so the warning has to
+    latch. It used to re-fire on each one — the guard was a bare expression
+    statement rather than a flag.
+    """
+    for page in (1, 2, 3):
+        httpx_mock.add_response(
+            url=f"{BASE}/products/?page={page}&page_size=100",
+            json={
+                "count":    900,
+                "next":     None if page == 3 else f"{BASE}/products/?page={page + 1}&page_size=100",
+                "previous": None,
+                "results":  [{"id": page * 1000 + i} for i in range(300)],
+            },
+        )
+
+    fetch_all(client, "products/")
+    captured = capsys.readouterr()
+    assert (captured.out + captured.err).count("Fetching large dataset") == 1
+
+
+# ── --page-size interaction ───────────────────────────────────────────────────
+
+
+def test_fetch_all_honors_explicit_page_size(client, httpx_mock, monkeypatch):
+    """An explicit --page-size must win over --all's 100-per-request default."""
+    from retailops_cli import state
+
+    monkeypatch.setattr(state, "page_size", 25)
+    monkeypatch.setattr(state, "page_size_explicit", True)
+
+    httpx_mock.add_response(
+        url=f"{BASE}/products/?page=1&page_size=25",
+        json={"count": 0, "next": None, "previous": None, "results": []},
+    )
+    fetch_all(client, "products/")
+    assert dict(httpx_mock.get_request().url.params)["page_size"] == "25"
+
+
+def test_fetch_all_ignores_the_implicit_page_size_default(client, httpx_mock, monkeypatch):
+    """
+    The global default of 25 is not an instruction — only a --page-size the
+    user actually typed should shrink --all's requests.
+    """
+    from retailops_cli import state
+
+    monkeypatch.setattr(state, "page_size", 25)
+    monkeypatch.setattr(state, "page_size_explicit", False)
+
+    httpx_mock.add_response(
+        url=f"{BASE}/products/?page=1&page_size=100",
+        json={"count": 0, "next": None, "previous": None, "results": []},
+    )
+    fetch_all(client, "products/")
+    assert dict(httpx_mock.get_request().url.params)["page_size"] == "100"
+
+
+def test_fetch_all_caps_page_size_at_100(client, httpx_mock):
+    """The API rejects anything above 100, so clamp rather than let it 400."""
+    httpx_mock.add_response(
+        url=f"{BASE}/products/?page=1&page_size=100",
+        json={"count": 0, "next": None, "previous": None, "results": []},
+    )
+    fetch_all(client, "products/", page_size=5000)
+    assert dict(httpx_mock.get_request().url.params)["page_size"] == "100"

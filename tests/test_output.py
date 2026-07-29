@@ -4,11 +4,13 @@ tests/test_output.py
 Tests for output rendering (table / json / csv) and partial-success.
 
 Strategy:
-- Replace ``output.console`` with a Rich Console that writes to a StringIO
-  with ``force_terminal=False, no_color=True`` so we can assert on plain
-  text without ANSI escape sequences.
+- Replace ``output.console`` and ``output.err_console`` with one Rich Console
+  writing to a StringIO with ``force_terminal=False, no_color=True`` so we can
+  assert on plain text without ANSI escape sequences.
 - For JSON/CSV we validate the structured content; for table we assert on
   field tokens that should appear in the rendered text.
+- Where the *stream* is the point (results on stdout, diagnostics on stderr)
+  we use capsys instead, so the split is actually exercised.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import json
 import sys
 
 import pytest
+import typer
 from rich.console import Console
 
 from retailops_cli import output
@@ -29,7 +32,13 @@ from retailops_cli import output
 
 @pytest.fixture
 def capture_console(monkeypatch):
-    """Replace output.console with a Rich console writing to a StringIO."""
+    """
+    Replace both output consoles with one Rich console writing to a StringIO.
+
+    Results go to stdout and diagnostics to stderr, but these tests assert on
+    content rather than on stream, so merging the two keeps the assertions
+    about what is rendered rather than where it landed.
+    """
     buf = io.StringIO()
     fake = Console(
         file=buf,
@@ -41,34 +50,34 @@ def capture_console(monkeypatch):
         highlight=False,
     )
     monkeypatch.setattr(output, "console", fake)
+    monkeypatch.setattr(output, "err_console", fake)
     return buf
 
 
 # ── JSON renderer ─────────────────────────────────────────────────────────────
 
 
-def test_render_json_emits_valid_json_for_dict(capture_console):
-    output.render({"id": 1, "sku": "ABC", "price": "9.99"}, fmt="json")
-    text = capture_console.getvalue()
-    # Strip Rich's ASCII frame; just look for the JSON tokens.
-    assert '"id":' in text
-    assert '"sku":' in text
-    assert '"ABC"' in text
+# JSON goes straight to stdout when stdout is not a terminal, bypassing Rich,
+# so these read capsys rather than the patched console — which also means they
+# assert on exactly what a pipe would receive.
 
 
-def test_render_json_emits_valid_json_for_list(capture_console):
-    output.render([{"id": 1}, {"id": 2}], fmt="json")
-    text = capture_console.getvalue()
-    assert '"id":' in text
-    assert "1" in text and "2" in text
+def test_render_json_emits_valid_json_for_dict(capsys):
+    payload = {"id": 1, "sku": "ABC", "price": "9.99"}
+    output.render(payload, fmt="json")
+    assert json.loads(capsys.readouterr().out) == payload
 
 
-def test_render_json_handles_paginated_envelope(capture_console):
+def test_render_json_emits_valid_json_for_list(capsys):
+    payload = [{"id": 1}, {"id": 2}]
+    output.render(payload, fmt="json")
+    assert json.loads(capsys.readouterr().out) == payload
+
+
+def test_render_json_handles_paginated_envelope(capsys):
     env = {"count": 2, "next": None, "previous": None, "results": [{"id": 1}, {"id": 2}]}
     output.render(env, fmt="json")
-    text = capture_console.getvalue()
-    assert '"count":' in text
-    assert '"results":' in text
+    assert json.loads(capsys.readouterr().out) == env
 
 
 # ── CSV renderer ──────────────────────────────────────────────────────────────
@@ -210,12 +219,13 @@ def test_infer_columns_drops_skip_cols():
 # ── partial-success ───────────────────────────────────────────────────────────
 
 
-def test_render_partial_success_json_preserves_envelope(capture_console):
+def test_render_partial_success_json_preserves_envelope(capsys):
+    """json mode emits the whole envelope to stdout; only the exit code changed."""
     env = {"succeeded": [{"id": 1}], "failed": [{"id": 2, "error": "bad"}]}
-    output.render_partial_success(env, fmt="json")
-    text = capture_console.getvalue()
-    assert '"succeeded":' in text
-    assert '"failed":' in text
+    with pytest.raises(typer.Exit) as excinfo:
+        output.render_partial_success(env, fmt="json")
+    assert excinfo.value.exit_code == 1
+    assert json.loads(capsys.readouterr().out) == env
 
 
 def test_render_partial_success_table_lists_succeeded_and_failed(capture_console):
@@ -223,7 +233,9 @@ def test_render_partial_success_table_lists_succeeded_and_failed(capture_console
         "succeeded": [{"id": 1, "status": "confirmed"}, {"id": 2, "status": "confirmed"}],
         "failed":    [{"id": 99, "error": "wrong status"}],
     }
-    output.render_partial_success(env, fmt="table", succeeded_columns=["id", "status"])
+    with pytest.raises(typer.Exit) as excinfo:
+        output.render_partial_success(env, fmt="table", succeeded_columns=["id", "status"])
+    assert excinfo.value.exit_code == 1
     text = capture_console.getvalue()
     assert "2" in text and "succeeded" in text
     assert "1" in text and "failed" in text
@@ -233,10 +245,56 @@ def test_render_partial_success_table_lists_succeeded_and_failed(capture_console
 
 def test_render_partial_success_handles_empty_succeeded(capture_console):
     env = {"succeeded": [], "failed": [{"id": 1, "error": "x"}]}
-    output.render_partial_success(env, fmt="table")
+    with pytest.raises(typer.Exit) as excinfo:
+        output.render_partial_success(env, fmt="table")
+    assert excinfo.value.exit_code == 1
     text = capture_console.getvalue()
     assert "No items succeeded" in text
     assert "1 failed" in text or "failed" in text
+
+
+def test_json_output_stays_valid_when_a_value_is_longer_than_the_terminal(capsys):
+    """
+    Rich wraps to the console width and folds long strings mid-token, which
+    produced invalid JSON for any notes/description field over ~80 chars.
+    Piped output must be byte-exact so `--output json | jq` works.
+    """
+    payload = {"id": 1, "notes": "x" * 300, "url": "https://example.com/" + "y" * 200}
+    output.render(payload, fmt="json")
+    out = capsys.readouterr().out
+    assert json.loads(out) == payload
+
+
+def test_json_output_has_no_trailing_padding(capsys):
+    """Rich pads every line to the console width; a pipe should get none."""
+    output.render({"id": 1}, fmt="json")
+    for line in capsys.readouterr().out.splitlines():
+        assert line == line.rstrip(), f"trailing whitespace in {line!r}"
+
+
+def test_render_partial_success_clean_batch_does_not_exit(capture_console):
+    """A batch with nothing in "failed" is an ordinary success — no raise."""
+    env = {"succeeded": [{"id": 1, "status": "shipped"}], "failed": []}
+    output.render_partial_success(env, fmt="table", succeeded_columns=["id", "status"])
+    assert "succeeded" in capture_console.getvalue()
+
+
+def test_render_partial_success_sends_diagnostics_to_stderr(monkeypatch, capsys):
+    """
+    The counts and failure list must not pollute stdout, so that
+    `orders bulk-ship --output csv > file.csv` yields a usable file.
+    """
+    env = {
+        "succeeded": [{"id": 1, "status": "shipped"}],
+        "failed":    [{"id": 9, "error": "wrong status"}],
+    }
+    with pytest.raises(typer.Exit):
+        output.render_partial_success(env, fmt="csv", succeeded_columns=["id", "status"])
+    captured = capsys.readouterr()
+    assert "id,status" in captured.out
+    assert "succeeded" not in captured.out
+    assert "wrong status" not in captured.out
+    assert "wrong status" in captured.err
 
 
 # ── YAML renderer (Phase 5) ───────────────────────────────────────────────────
@@ -306,14 +364,14 @@ def test_read_json_arg_missing_file_exits_1(workspace_tmp_path, capsys):
 # ── print_dry_run (Phase 5) ───────────────────────────────────────────────────
 
 
-def test_print_dry_run_with_body(capture_console):
+def test_print_dry_run_with_body(capture_console, capsys):
+    """Header lines go through Rich; the body takes the pipe-safe JSON path."""
     output.print_dry_run("POST", "inventory/adjust/", {"product_id": 5, "quantity": 10})
-    text = capture_console.getvalue()
-    assert "DRY RUN" in text
-    assert "POST" in text
-    assert "inventory/adjust/" in text
-    assert "product_id" in text
-    assert "10" in text
+    header = capture_console.getvalue()
+    assert "DRY RUN" in header
+    assert "POST" in header
+    assert "inventory/adjust/" in header
+    assert json.loads(capsys.readouterr().out) == {"product_id": 5, "quantity": 10}
 
 
 def test_print_dry_run_without_body(capture_console):

@@ -22,7 +22,7 @@ from .. import state
 from ..config import get_profile
 from ..errors import RetailOpsError, handle_error, handle_connection_error
 from ..files import multipart_file
-from ..output import console, print_dry_run, print_success, read_json_arg, render
+from ..output import console, print_success, read_json_arg, render
 from ..pager import fetch_all, paginated_get
 
 app = typer.Typer(no_args_is_help=True)
@@ -74,7 +74,7 @@ def list_payments(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt, columns=[
@@ -99,7 +99,7 @@ def get(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt)
@@ -159,13 +159,6 @@ def record(
         "notes":             notes,
     }
 
-    if state.dry_run:
-        preview = dict(body)
-        if receipt_image:
-            preview["receipt_image"] = receipt_image
-        print_dry_run("POST", "payments/", preview)
-        return
-
     try:
         with _client() as client:
             if receipt_image:
@@ -179,7 +172,7 @@ def record(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
 
@@ -238,7 +231,7 @@ def verify_receipt(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
 
@@ -257,7 +250,7 @@ def receipt_healthz(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
 

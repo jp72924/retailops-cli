@@ -22,7 +22,7 @@ import typer
 
 from .. import state
 from ..config import get_profile
-from ..errors import RetailOpsError, abort, handle_error, handle_connection_error
+from ..errors import RetailOpsError, confirm_or_abort, handle_error, handle_connection_error
 from ..files import multipart_file
 from ..output import console, print_success, render
 from ..pager import fetch_all, paginated_get
@@ -68,7 +68,7 @@ def list_products(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt, columns=[
@@ -92,7 +92,7 @@ def get(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt)
@@ -138,7 +138,7 @@ def create(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"Product '{data['name']}' created (id={data['id']}, sku={data['sku']}).")
@@ -190,7 +190,7 @@ def update(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"Product {id} updated.")
@@ -204,16 +204,14 @@ def delete(
     id: int = typer.Argument(..., help="Product ID."),
 ) -> None:
     """Delete a product. Requires Manager role."""
-    if not state.yes:
-        if not typer.confirm(f"Delete product {id}?", default=False):
-            abort()
+    confirm_or_abort(f"Delete product {id}?")
     try:
         with _client() as client:
             client.delete(f"products/{id}/")
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"Product {id} deleted.")
@@ -237,7 +235,7 @@ def movements(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt, columns=[

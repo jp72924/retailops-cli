@@ -98,6 +98,16 @@ def save_config(cfg: dict) -> None:
         tomli_w.dump(cfg, fh)
 
 
+def get_setting(key: str, default=None):
+    """
+    Read a value from the [settings] table of config.toml.
+
+    Used by the root callback for the defaults a user can persist —
+    output_format and page_size — so an explicitly passed flag still wins.
+    """
+    return load_config().get("settings", {}).get(key, default)
+
+
 # ── profile helpers ───────────────────────────────────────────────────────────
 
 def get_profile(name: str | None = None) -> Profile:

@@ -12,6 +12,7 @@ Coverage:
 - 4xx responses are converted to RetailOpsError with parsed envelope.
 - 429 triggers retry up to 3 attempts honoring Retry-After.
 - After the retry budget, a final 429 still raises.
+- --dry-run intercepts every non-GET verb inside _send and exits 0.
 """
 
 from __future__ import annotations
@@ -19,7 +20,10 @@ from __future__ import annotations
 from io import BytesIO
 
 import pytest
+import typer
 
+from retailops_cli import state
+from retailops_cli.client import RetailOpsClient
 from retailops_cli.errors import RetailOpsError
 
 
@@ -270,3 +274,70 @@ def test_client_works_as_context_manager(profile, httpx_mock):
     httpx_mock.add_response(url=f"{BASE}/dashboard/", json={})
     with RetailOpsClient(profile) as c:
         c.get("dashboard/")
+
+
+# ── --dry-run interception ────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def dry_run(monkeypatch):
+    """Enable --dry-run the way the root callback would."""
+    monkeypatch.setattr(state, "dry_run", True)
+
+
+@pytest.mark.parametrize("call", [
+    lambda c: c.post("orders/", {"customer_id": 1}),
+    lambda c: c.patch("orders/1/", {"notes": "x"}),
+    lambda c: c.put("orders/1/", {"notes": "x"}),
+    lambda c: c.delete("orders/1/"),
+    lambda c: c.post_multipart("products/", {"sku": "A1"}, {}),
+    lambda c: c.patch_multipart("products/1/", {"sku": "A1"}, {}),
+])
+def test_dry_run_intercepts_every_mutating_verb(client, httpx_mock, dry_run, call):
+    """
+    Every non-GET verb is gated in _send, so no future verb can slip past.
+    httpx_mock has nothing queued — a leaked request fails the test.
+    """
+    with pytest.raises(typer.Exit) as excinfo:
+        call(client)
+    assert excinfo.value.exit_code == 0
+    assert httpx_mock.get_requests() == []
+
+
+def test_dry_run_leaves_get_alone(client, httpx_mock, dry_run):
+    """Reads must keep working under --dry-run; get_text() rides on GET too."""
+    httpx_mock.add_response(url=f"{BASE}/dashboard/", json={"ok": True})
+    assert client.get("dashboard/") == {"ok": True}
+
+
+def test_dry_run_preview_names_uploaded_files_without_reading_them(client, httpx_mock, dry_run):
+    """
+    A multipart preview shows the filename, not the bytes. The handle is never
+    read, so previewing an upload cannot exhaust the stream.
+    """
+    handle = BytesIO(b"not-really-a-png")
+    files = {"image": ("shoe.jpg", handle, "image/jpeg")}
+    with pytest.raises(typer.Exit):
+        client.post_multipart("products/", {"sku": "A1"}, files)
+    assert httpx_mock.get_requests() == []
+    assert handle.tell() == 0, "the file handle should not have been read"
+
+
+def test_preview_body_redacts_secrets_and_stringifies_uploads():
+    """Unit-level check of the preview payload builder."""
+    preview = RetailOpsClient._preview_body({
+        "json": {"email": "a@b.co", "password": "hunter2", "role": 2},
+    })
+    assert preview == {"email": "a@b.co", "password": "***", "role": 2}
+
+    preview = RetailOpsClient._preview_body({
+        "data":  {"sku": "A1", "ocr_api_key": "live-key"},
+        "files": {"image": ("shoe.jpg", BytesIO(b""), "image/jpeg")},
+    })
+    assert preview == {"sku": "A1", "ocr_api_key": "***", "image": "shoe.jpg"}
+
+    # A blank secret is not worth masking — masking it would imply one was set.
+    assert RetailOpsClient._preview_body({"json": {"token": ""}}) == {"token": ""}
+
+    # DELETE carries no kwargs at all; print_dry_run renders no body block.
+    assert RetailOpsClient._preview_body({}) is None

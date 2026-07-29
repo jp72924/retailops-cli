@@ -2,14 +2,20 @@
 commands/settings.py
 --------------------
   retailops-cli settings get
-  retailops-cli settings update  [--currency-code STR] [--currency-symbol STR]
-                       [--decimal-places INT]
-                       [--secondary-enabled / --no-secondary-enabled]
-                       [--secondary-code STR] [--secondary-symbol STR]
-                       [--secondary-decimal-places INT] [--secondary-rate STR]
+  retailops-cli settings update       [--currency-code STR] [--currency-symbol STR]
+                            [--decimal-places INT]
+                            [--secondary-enabled / --no-secondary-enabled]
+                            [--secondary-code STR] [--secondary-symbol STR]
+                            [--secondary-decimal-places INT] [--secondary-rate STR]
+                            [--secondary-rate-auto / --no-secondary-rate-auto]
+                            [--secondary-rate-source-url STR] [--secondary-rate-source-field STR]
+                            [--recipient-validation / --no-recipient-validation]
+                            [OCR flags]
+  retailops-cli settings refresh-rate
 
-System-wide currency configuration (primary + optional secondary currency).
-Permissions: get = any authenticated; update = Manager+.
+System-wide currency configuration (primary + optional secondary currency),
+OCR receipt verification, and recipient validation.
+Permissions: get = any authenticated; update / refresh-rate = Manager+.
 """
 
 from __future__ import annotations
@@ -46,7 +52,7 @@ def get(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt)
@@ -77,6 +83,19 @@ def update(
     secondary_rate:           Optional[str]  = typer.Option(
         None, "--secondary-rate",
         help="Exchange rate (primary to secondary), decimal string e.g. '36.50'."),
+    secondary_rate_auto:      Optional[bool] = typer.Option(
+        None, "--secondary-rate-auto/--no-secondary-rate-auto",
+        help="Fetch the secondary rate automatically from the configured source."),
+    secondary_rate_source_url: Optional[str] = typer.Option(
+        None, "--secondary-rate-source-url",
+        help="URL to fetch the secondary rate from. Required when auto-update is on."),
+    secondary_rate_source_field: Optional[str] = typer.Option(
+        None, "--secondary-rate-source-field",
+        help="JSON field to read the rate from, e.g. 'promedio'. Required when auto-update is on."),
+    recipient_validation: Optional[bool] = typer.Option(
+        None, "--recipient-validation/--no-recipient-validation",
+        help="Match verified receipts against the recipient allowlist. "
+             "Enabling requires at least one active recipient profile."),
     ocr_enabled: Optional[bool] = typer.Option(
         None, "--ocr-enabled/--no-ocr-enabled",
         help="Enable or disable OCR receipt verification."),
@@ -107,8 +126,15 @@ def update(
 
     Primary fields: --currency-code, --currency-symbol, --decimal-places.
     Secondary fields: --secondary-enabled, --secondary-code, --secondary-symbol,
-    --secondary-decimal-places, --secondary-rate. OCR fields are also supported.
-    Only flags you supply are sent.
+    --secondary-decimal-places, --secondary-rate, and the --secondary-rate-auto
+    trio for scheduled updates. OCR and recipient-validation fields are also
+    supported. Only flags you supply are sent.
+
+    \b
+    Note:
+      --recipient-validation is rejected unless at least one active recipient
+      profile exists. Create one first with:
+        retailops-cli recipient-profiles create --help
     """
     if ocr_api_key is not None and clear_ocr_api_key:
         from ..errors import err_console
@@ -124,6 +150,11 @@ def update(
     if secondary_symbol         is not None: body["secondary_currency_symbol"]   = secondary_symbol
     if secondary_decimal_places is not None: body["secondary_decimal_places"]    = secondary_decimal_places
     if secondary_rate           is not None: body["secondary_exchange_rate"]     = secondary_rate
+    if secondary_rate_auto      is not None: body["secondary_rate_auto_update_enabled"] = secondary_rate_auto
+    if secondary_rate_source_url is not None: body["secondary_rate_source_url"]  = secondary_rate_source_url
+    if secondary_rate_source_field is not None:
+        body["secondary_rate_source_field"] = secondary_rate_source_field
+    if recipient_validation     is not None: body["recipient_validation_enabled"] = recipient_validation
     if ocr_enabled              is not None: body["ocr_enabled"]                 = ocr_enabled
     if ocr_provider             is not None: body["ocr_provider"]                = ocr_provider
     if ocr_base_url             is not None: body["ocr_base_url"]                = ocr_base_url
@@ -150,8 +181,36 @@ def update(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success("Settings updated.")
+    render(data, fmt)
+
+
+# ── refresh-rate ──────────────────────────────────────────────────────────────
+
+@app.command(name="refresh-rate")
+def refresh_rate(
+    output: Optional[str] = typer.Option(None, "--output", "-o"),
+) -> None:
+    """
+    Fetch the secondary exchange rate from its configured source and store it.
+
+    Requires Manager role, and requires --secondary-rate-source-url and
+    --secondary-rate-source-field to already be set. Use this to trigger an
+    on-demand update; to set a rate by hand instead, use:
+      retailops-cli settings update --secondary-rate 36.50
+    """
+    fmt = output or state.output
+    try:
+        with _client() as client:
+            data = client.post("settings/secondary-rate/refresh/")
+    except RetailOpsError as e:
+        handle_error(e)
+        return
+    except httpx.RequestError as e:
+        handle_connection_error(e, get_profile(state.profile).base_url)
+        return
+    print_success(f"Exchange rate refreshed to {data['secondary_exchange_rate']}.")
     render(data, fmt)
