@@ -37,8 +37,8 @@ from typing import List
 
 from .. import state
 from ..config import get_profile
-from ..errors import RetailOpsError, abort, handle_error, handle_connection_error
-from ..output import console, err_console, print_dry_run, print_success, render, render_partial_success
+from ..errors import RetailOpsError, abort, confirm_or_abort, handle_error, handle_connection_error
+from ..output import console, err_console, print_success, render, render_partial_success
 from ..pager import fetch_all, paginated_get
 
 app = typer.Typer(no_args_is_help=True)
@@ -71,7 +71,7 @@ def _transition(id: int, action: str) -> None:
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"Order {id} → [bold]{data['status']}[/bold].")
@@ -113,7 +113,7 @@ def list_orders(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt, columns=[
@@ -137,7 +137,7 @@ def get(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render(data, fmt)
@@ -182,7 +182,7 @@ def create(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"Order [bold]{data['order_number']}[/bold] created (id={data['id']}, status=draft).")
@@ -218,7 +218,7 @@ def update(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"Order {id} updated.")
@@ -232,19 +232,16 @@ def delete(
     id: int = typer.Argument(..., help="Order ID. Must be in Draft status."),
 ) -> None:
     """Permanently delete a Draft order. Cannot be undone."""
-    if not state.yes:
-        if not typer.confirm(
-            f"Delete order {id}? This permanently removes the order and all its line items.",
-            default=False,
-        ):
-            abort()
+    confirm_or_abort(
+        f"Delete order {id}? This permanently removes the order and all its line items."
+    )
     try:
         with _client() as client:
             client.delete(f"orders/{id}/")
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     print_success(f"Order {id} deleted.")
@@ -283,15 +280,9 @@ def cancel(id: int = typer.Argument(..., help="Order ID. Must be in Confirmed st
 
     Cannot be used after payment — use `retailops-cli orders refund` for Paid orders.
     """
-    if state.dry_run:
-        print_dry_run("POST", f"orders/{id}/cancel/")
-        return
-    if not state.yes:
-        if not typer.confirm(
-            f"Cancel order {id}? Stock will be restored via inventory movements.",
-            default=False,
-        ):
-            abort()
+    confirm_or_abort(
+        f"Cancel order {id}? Stock will be restored via inventory movements."
+    )
     _transition(id, "cancel")
 
 
@@ -303,10 +294,9 @@ def refund(id: int = typer.Argument(..., help="Order ID. Must be in Paid status.
     Payment records are NOT deleted — they remain as immutable financial records.
     This action cannot be undone.
     """
-    if state.dry_run:
-        print_dry_run("POST", f"orders/{id}/refund/")
-        return
-    if not state.yes:
+    # Bespoke retype-the-ID prompt rather than a yes/no, so it can't reuse
+    # confirm_or_abort — but it needs the same --dry-run bypass.
+    if not state.yes and not state.dry_run:
         console.print(
             f"[bold red]Refund order {id}?[/bold red] "
             "This is irreversible. Stock will be restored. "
@@ -337,7 +327,7 @@ def _bulk_transition(ids: list[int], action: str, fmt: str) -> None:
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
     render_partial_success(data, fmt, succeeded_columns=_BULK_COLUMNS)

@@ -42,8 +42,8 @@ def test_root_help():
     # Each registered group should appear in the root help.
     for group in [
         "auth", "roles", "users", "settings", "customers", "categories",
-        "products", "inventory", "orders", "payments", "kiosk", "schema",
-        "dashboard", "mcp-skill",
+        "products", "inventory", "orders", "payments", "recipient-profiles",
+        "kiosk", "schema", "dashboard", "mcp-skill",
     ]:
         assert group in out, f"missing group: {group}"
 
@@ -53,7 +53,8 @@ def test_root_help():
 
 @pytest.mark.parametrize("group", [
     "auth", "roles", "users", "settings", "customers", "categories",
-    "products", "inventory", "orders", "payments", "kiosk", "schema",
+    "products", "inventory", "orders", "payments", "recipient-profiles",
+    "kiosk", "schema",
 ])
 def test_group_help_does_not_crash(group):
     r = runner.invoke(app, [group, "--help"])
@@ -84,6 +85,7 @@ def test_group_help_does_not_crash(group):
     # settings
     ["settings", "get", "--help"],
     ["settings", "update", "--help"],
+    ["settings", "refresh-rate", "--help"],
     # customers
     ["customers", "list", "--help"],
     ["customers", "get", "--help"],
@@ -129,6 +131,12 @@ def test_group_help_does_not_crash(group):
     ["payments", "record", "--help"],
     ["payments", "verify-receipt", "--help"],
     ["payments", "receipt-healthz", "--help"],
+    # recipient-profiles
+    ["recipient-profiles", "list", "--help"],
+    ["recipient-profiles", "get", "--help"],
+    ["recipient-profiles", "create", "--help"],
+    ["recipient-profiles", "update", "--help"],
+    ["recipient-profiles", "delete", "--help"],
     # kiosk
     ["kiosk", "identify", "--help"],
     ["kiosk", "register", "--help"],

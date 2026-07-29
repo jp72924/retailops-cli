@@ -69,7 +69,7 @@ def mcp_skill_command(
         except RetailOpsError as e:
             handle_error(e)
             return
-        except httpx.ConnectError as e:
+        except httpx.RequestError as e:
             handle_connection_error(e, base)
             return
         sys.stdout.write(r.text)
@@ -92,7 +92,7 @@ def mcp_skill_command(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, prof.base_url)
         return
     render(data, fmt)

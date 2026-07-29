@@ -16,7 +16,7 @@ import typer
 from .. import state
 from ..config import get_profile
 from ..errors import RetailOpsError, handle_connection_error, handle_error
-from ..output import err_console, print_dry_run, render, read_json_arg
+from ..output import err_console, render, read_json_arg
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -71,7 +71,7 @@ def identify(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         _handle_connection(e)
         return
     render(data, fmt)
@@ -110,7 +110,7 @@ def register(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         _handle_connection(e)
         return
     render(data, fmt)
@@ -130,7 +130,7 @@ def products(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         _handle_connection(e)
         return
     render(data, fmt, columns=["id", "sku", "name", "unit_price", "current_stock", "image_url"])
@@ -150,7 +150,7 @@ def product_get(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         _handle_connection(e)
         return
     render(data, fmt)
@@ -170,7 +170,7 @@ def product_lookup(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         _handle_connection(e)
         return
     render(data, fmt)
@@ -196,9 +196,6 @@ def checkout(
         "payment_method": payment_method,
         "receipt": parsed_receipt,
     }
-    if state.dry_run:
-        print_dry_run("POST", "kiosk/checkout/", body)
-        return
     fmt = output or state.output
     try:
         with _kiosk_client(kiosk_key) as client:
@@ -206,7 +203,7 @@ def checkout(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         _handle_connection(e)
         return
     render(data, fmt)
@@ -226,7 +223,7 @@ def receipt(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         _handle_connection(e)
         return
     render(data, fmt)
@@ -245,7 +242,7 @@ def heartbeat(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         _handle_connection(e)
         return
     render(data, fmt)

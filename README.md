@@ -4,8 +4,8 @@
 
 RetailOps CLI is a standalone command-line client for the RetailOps REST API. It
 gives operators and developers a terminal-first way to run authenticated
-workflows for customers, catalog, inventory, orders, payments, settings, kiosk
-operations, and API schema inspection.
+workflows for customers, catalog, inventory, orders, payments, recipient
+profiles, settings, kiosk operations, and API schema inspection.
 
 The CLI does not install or run the RetailOps backend, RetailOps Kiosk, a
 database, or object storage. It connects to an existing RetailOps API at
@@ -56,11 +56,12 @@ retailops-cli products list --search shoes
 retailops-cli inventory adjust --product-id 5 --quantity 10 --notes "Restock"
 retailops-cli orders create --customer-id 12 --items '[{"product_id":5,"quantity":2}]'
 retailops-cli payments record --order 88 --amount 19.99 --method cash
+retailops-cli recipient-profiles list --method mobile_payment
 retailops-cli settings get --output yaml
 ```
 
-Use `--dry-run` on supported mutating commands to preview the HTTP request before
-the CLI calls the API:
+Use `--dry-run` on any command that changes data to preview the HTTP request before
+the CLI calls the API. Read-only commands ignore it; secrets are masked in the preview:
 
 ```bash
 retailops-cli --dry-run inventory adjust --product-id 5 --quantity 10

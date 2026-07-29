@@ -15,6 +15,8 @@ Authentication and profile management commands.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import httpx
 import typer
 
@@ -28,10 +30,24 @@ from ..config import (
     set_active_profile,
     set_profile_token,
 )
-from ..errors import RetailOpsError, handle_error, handle_connection_error, raise_for_status
+from ..errors import RetailOpsError, handle_error, handle_connection_error
 from ..output import console, err_console, print_info, print_success
 
 app = typer.Typer(no_args_is_help=True)
+
+
+def _anon_client(base: str):
+    """
+    Client bound to `base` with no Authorization header, for the three public
+    auth endpoints (login and the two password-reset steps).
+
+    Routing these through RetailOpsClient rather than raw httpx.post gives them
+    the same --verbose logging, 429 retry, and error-envelope parsing as every
+    other command — and keeps the auth token out of the request.
+    """
+    from ..client import RetailOpsClient
+    prof = replace(get_profile(state.profile), base_url=base, token="")
+    return RetailOpsClient(prof, verbose=state.verbose)
 
 
 @app.command()
@@ -53,18 +69,12 @@ def login(
 
     base = url.rstrip("/")
     try:
-        r = httpx.post(
-            f"{base}/auth/token/",
-            json={"email": email, "password": password},
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-            timeout=30,
-        )
-        raise_for_status(r)
-        data = r.json()
+        with _anon_client(base) as client:
+            data = client.post_anon("auth/token/", {"email": email, "password": password})
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, base)
         return
 
@@ -92,7 +102,7 @@ def logout(
         if e.status not in (401, 403):
             # A 401 just means the token was already invalid — that's fine.
             handle_error(e)
-    except httpx.ConnectError:
+    except httpx.RequestError:
         pass  # Server unreachable but we can still clear the local token.
 
     remove_profile_token(prof.name)
@@ -122,7 +132,7 @@ def whoami() -> None:
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, prof.base_url)
         return
 
@@ -272,18 +282,12 @@ def passwd_reset(
     """
     base = _resolve_base(url)
     try:
-        r = httpx.post(
-            f"{base}/auth/password-reset/",
-            json={"email": email},
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-            timeout=30,
-        )
-        raise_for_status(r)
-        data = r.json()
+        with _anon_client(base) as client:
+            data = client.post_anon("auth/password-reset/", {"email": email})
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, base)
         return
     print_success(data.get("detail", "Password reset email sent."))
@@ -317,23 +321,17 @@ def passwd_reset_confirm(
 
     base = _resolve_base(url)
     try:
-        r = httpx.post(
-            f"{base}/auth/password-reset/confirm/",
-            json={
+        with _anon_client(base) as client:
+            data = client.post_anon("auth/password-reset/confirm/", {
                 "uid":              uid,
                 "token":            token,
                 "new_password":     new_password,
                 "confirm_password": confirm,
-            },
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-            timeout=30,
-        )
-        raise_for_status(r)
-        data = r.json()
+            })
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, base)
         return
     print_success(data.get("detail", "Password has been reset successfully."))

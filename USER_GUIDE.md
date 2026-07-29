@@ -41,7 +41,7 @@ A step-by-step guide for daily users. No technical background required.
 
 ## 1. Before You Begin
 
-This guide walks you through installing and using **RetailOps CLI** (`retailops-cli`) — a standalone command-line client that lets you manage RetailOps customers, catalog, inventory, orders, payments, settings, kiosk helpers, and schema tools from your terminal.
+This guide walks you through installing and using **RetailOps CLI** (`retailops-cli`) — a standalone command-line client that lets you manage RetailOps customers, catalog, inventory, orders, payments, recipient profiles, settings, kiosk helpers, and schema tools from your terminal.
 
 **What you will need:**
 
@@ -304,12 +304,11 @@ This will show a description of the command and all available options, without a
 Most commands display results as a table. For example, `retailops-cli customers list` might show:
 
 ```
- id   email                  first_name   last_name   created_at
- ─────────────────────────────────────────────────────────────────
- 12   alice@acmecorp.com     Alice        Smith       2024-01-10
- 13   bob@widgets.co         Bob          Jones       2024-01-15
+Id  Full Name    Email               Phone     City    Country        Created At
+12  Alice Smith  alice@acmecorp.com  555-0100  Austin  United States  2024-01-10
+13  Bob Jones    bob@widgets.co      555-0101  Denver  United States  2024-01-15
 
-Total: 2
+Showing 2 of 2
 ```
 
 - Each **row** is one record (one customer, one order, etc.)
@@ -321,7 +320,7 @@ Total: 2
 When a list has many records, results are shown 25 at a time. You will see a footer like:
 
 ```
-Page 1 of 4  (87 total)   use --page 2 for next
+Showing 25 of 87 · use --page N or --all to fetch more
 ```
 
 To see the next page:
@@ -340,7 +339,7 @@ retailops-cli orders list --all
 
 ### Confirmation prompts
 
-Commands that make permanent changes (creating, deleting, adjusting stock) will ask you to confirm before doing anything:
+Commands that destroy or reverse something — deleting a record, adjusting stock, cancelling or refunding an order, deactivating a user — ask you to confirm before doing anything:
 
 ```
 Record adjustment of +50 units for product 5? [Y/n]:
@@ -348,6 +347,8 @@ Record adjustment of +50 units for product 5? [Y/n]:
 
 - Press **Enter** or type `y` and press **Enter** to proceed.
 - Type `n` and press **Enter** to cancel.
+
+Creating and updating records does not prompt — those are easy to correct. `orders refund` asks you to retype the order ID rather than answer yes/no, because it cannot be undone.
 
 If you are running commands in a script or batch process and want to skip these prompts, add `--yes` (or `-y`) before the group name:
 
@@ -370,7 +371,11 @@ DRY RUN — request was not sent.
   POST orders/88/refund/
 ```
 
-No data is changed on the server. When you are happy that the command is right, run it again without `--dry-run`. This works for: `orders refund`, `orders cancel`, `customers delete`, `users deactivate`, `inventory adjust`, and `inventory bulk-adjust`.
+No data is changed on the server. When you are happy that the command is right, run it again without `--dry-run`.
+
+This works for **every** command that changes something — creating, updating, deleting, order transitions, stock adjustments, and bulk operations alike. Commands that only read data (`list`, `get`, `dashboard`) ignore `--dry-run` and return their results as usual.
+
+`--dry-run` also skips the confirmation prompt, since there is nothing to confirm. Any password or API key in the preview is shown as `***`.
 
 ### Output formats
 
@@ -1253,6 +1258,8 @@ retailops-cli orders list --output json > orders.json
 retailops-cli settings get --output yaml > currency-settings.yaml
 ```
 
+Progress and confirmation messages are written separately from the results, so a saved file or a command pipeline only ever receives the data itself — never a stray "✓ created" line.
+
 The file will be saved in whichever folder your terminal is currently in. To grab everything (not just the first page), add `--all`:
 
 ```
@@ -1457,6 +1464,23 @@ Cut out or print this page for quick access to the most common commands.
 | Create with extended fields | `retailops-cli customers create --first-name X --last-name Y --email X@Y.Z --national-id "..." --dob YYYY-MM-DD --gender F --address "..." --address-line-2 "..."` |
 | Update one or more fields | `retailops-cli customers update ID --field VALUE` |
 
+### Recipient profiles *(Manager)*
+
+The allowlist that verified mobile-payment and bank-transfer receipts are matched against. A receipt only matches when the phone or account number, the bank, and the document ID all agree.
+
+| Task | Command |
+|---|---|
+| List all profiles | `retailops-cli recipient-profiles list` |
+| List only mobile-payment profiles | `retailops-cli recipient-profiles list --method mobile_payment` |
+| View one profile | `retailops-cli recipient-profiles get 3` |
+| Add a mobile-payment recipient | `retailops-cli recipient-profiles create --method mobile_payment --phone 04121234567 --bank BDV --document-id V12345678` |
+| Add a bank-transfer recipient | `retailops-cli recipient-profiles create --method bank_transfer --account-number 01020304050607080910 --bank Banesco --document-id V12345678` |
+| Rename a profile | `retailops-cli recipient-profiles update 3 --label "Main line"` |
+| Take a profile out of matching | `retailops-cli recipient-profiles update 3 --inactive` |
+| Delete a profile | `retailops-cli recipient-profiles delete 3` |
+
+> **Note:** To stop matching against a recipient without losing the record, prefer `--inactive` over `delete`.
+
 ### System settings *(Manager)*
 
 | Task | Command |
@@ -1465,8 +1489,13 @@ Cut out or print this page for quick access to the most common commands.
 | Change primary currency | `retailops-cli settings update --currency-code EUR --currency-symbol "€"` |
 | Enable secondary currency | `retailops-cli settings update --secondary-enabled --secondary-code VES --secondary-symbol "Bs." --secondary-rate 36.50` |
 | Update the exchange rate only | `retailops-cli settings update --secondary-rate 38.10` |
+| Fetch the exchange rate from its source | `retailops-cli settings refresh-rate` |
+| Automate exchange-rate updates | `retailops-cli settings update --secondary-rate-auto --secondary-rate-source-url URL --secondary-rate-source-field promedio` |
 | Disable secondary currency | `retailops-cli settings update --no-secondary-enabled` |
 | Enable receipt OCR | `retailops-cli settings update --ocr-enabled --ocr-enabled-method mobile_payment --receipt-image-required` |
+| Enable recipient validation | `retailops-cli settings update --recipient-validation` |
+
+> **Note:** `--recipient-validation` is refused until at least one active recipient profile exists — create one first.
 
 ### Kiosk and schema
 
@@ -1483,7 +1512,7 @@ Cut out or print this page for quick access to the most common commands.
 | Option | What it does |
 |---|---|
 | `--yes` or `-y` | Skip all confirmation prompts |
-| `--dry-run` | Preview the request without sending it (delete / refund / cancel / deactivate / adjust commands) |
+| `--dry-run` | Preview the request without sending it (works on every command that changes data) |
 | `--output csv` | Output results as CSV (best for spreadsheets) |
 | `--output json` | Output results as JSON (best for scripts) |
 | `--output yaml` | Output results as YAML (best for human-readable backups) |
@@ -1491,6 +1520,19 @@ Cut out or print this page for quick access to the most common commands.
 | `--all` | Retrieve all pages of results at once |
 | `--profile NAME` | Use a specific saved connection for one command |
 | `--help` | Show help for any command |
+
+### Exit codes (for scripting)
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | The API rejected the request — or a bulk command in which **any** item failed |
+| `2` | Cannot reach the server, or the connection timed out |
+| `3` | Not found |
+| `4` | Permission denied — your role is insufficient |
+| `130` | You declined a confirmation prompt |
+
+Bulk commands (`orders bulk-*`, `inventory bulk-adjust`) report exit `1` if even one item failed, so `command || handle_error` behaves as you would expect. To tell a partial failure from a total one, read the `succeeded` and `failed` lists from `--output json` rather than branching on the exit code.
 
 **Payment methods:** `cash` · `mobile_payment` · `bank_transfer` · `card` · `check` · `other`
 

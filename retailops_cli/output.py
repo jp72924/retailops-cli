@@ -96,8 +96,21 @@ def render(data: Any, fmt: str = "table", columns: list[str] | None = None) -> N
 # ── JSON renderer ─────────────────────────────────────────────────────────────
 
 def _render_json(data: Any) -> None:
+    """
+    Render JSON: syntax-highlighted for a human, byte-exact for a pipe.
+
+    Rich wraps to the console width, and when stdout is not a terminal that
+    width falls back to 80 — which folds any string value longer than the line
+    by inserting a real newline *inside* the quoted token. The result is
+    invalid JSON, so `--output json | jq` broke on any long notes or
+    description field. Piped output therefore bypasses Rich entirely, the way
+    the YAML and CSV renderers already do.
+    """
     text = json.dumps(data, indent=2, ensure_ascii=False)
-    console.print(Syntax(text, "json", theme="monokai", word_wrap=True))
+    if console.is_terminal:
+        console.print(Syntax(text, "json", theme="monokai", word_wrap=True))
+    else:
+        sys.stdout.write(text + "\n")
 
 
 # ── YAML renderer ─────────────────────────────────────────────────────────────
@@ -257,16 +270,21 @@ def _normalise_to_list(data: Any) -> list[dict]:
 
 # ── convenience printers ──────────────────────────────────────────────────────
 
+# These are diagnostics, not results, so they go to stderr. Commands print a
+# success line immediately before render(), and on stdout that line lands
+# inside the JSON or CSV a caller is piping — `orders create --output json`
+# emitted "✓ Order … created" ahead of the object.
+
 def print_success(msg: str) -> None:
-    console.print(f"[green]✓[/green] {msg}")
+    err_console.print(f"[green]✓[/green] {msg}")
 
 
 def print_warning(msg: str) -> None:
-    console.print(f"[yellow]⚠[/yellow]  {msg}")
+    err_console.print(f"[yellow]⚠[/yellow]  {msg}")
 
 
 def print_info(msg: str) -> None:
-    console.print(f"[dim]{msg}[/dim]")
+    err_console.print(f"[dim]{msg}[/dim]")
 
 
 # ── JSON-input helper ─────────────────────────────────────────────────────────
@@ -313,14 +331,17 @@ def read_json_arg(value: str, *, what: str = "value") -> Any:
 def print_dry_run(method: str, path: str, body: dict | None = None) -> None:
     """
     Print a structured preview of a planned HTTP request for --dry-run.
-    Goes to stdout (not stderr) so users can pipe it through jq if desired.
+
+    This is the command's primary output under --dry-run, not a diagnostic, so
+    it goes to stdout. The preview as a whole is not machine-readable — the
+    header lines are prose — but the body is rendered through the same
+    pipe-safe path as --output json so it stays valid on its own.
     """
-    console.print(f"[bold yellow]DRY RUN[/bold yellow] — request was [bold]not[/bold] sent.")
+    console.print("[bold yellow]DRY RUN[/bold yellow] — request was [bold]not[/bold] sent.")
     console.print(f"  [bold]{method.upper()}[/bold] {path}")
     if body is not None:
-        text = json.dumps(body, indent=2, ensure_ascii=False)
         console.print("  [dim]body:[/dim]")
-        console.print(Syntax(text, "json", theme="monokai", word_wrap=True))
+        _render_json(body)
 
 
 def render_partial_success(
@@ -331,24 +352,35 @@ def render_partial_success(
     """
     Render a partial-success response envelope: {"succeeded": [...], "failed": [...]}.
 
-    In table/csv mode, succeeded rows are rendered as a list table followed by
-    a plain failure list. In json mode the full envelope is rendered as-is.
+    In table/csv mode the succeeded rows go to stdout as a list table, while the
+    counts and the failure list go to stderr — so `--output csv > file.csv`
+    yields a clean file. In json mode the full envelope is rendered as-is, so
+    `| jq` sees both arrays.
+
+    Raises typer.Exit(1) when "failed" is non-empty, for every output format.
+    The API answers 200 even when every item failed, so the exit code is the
+    only signal a calling script gets. Both call sites are in tail position,
+    which makes raising equivalent to returning.
     """
-    if fmt == "json":
-        _render_json(data)
-        return
+    import typer  # local import to keep this module CLI-agnostic in unit tests
 
     succeeded = data.get("succeeded", [])
     failed    = data.get("failed", [])
 
-    if succeeded:
-        console.print(f"[green]✓[/green] [bold]{len(succeeded)}[/bold] succeeded:")
-        render(succeeded, fmt, succeeded_columns)
+    if fmt == "json":
+        _render_json(data)
     else:
-        console.print("[dim]No items succeeded.[/dim]")
+        if succeeded:
+            err_console.print(f"[green]✓[/green] [bold]{len(succeeded)}[/bold] succeeded:")
+            render(succeeded, fmt, succeeded_columns)
+        else:
+            err_console.print("[dim]No items succeeded.[/dim]")
+
+        if failed:
+            err_console.print(f"\n[red]✗[/red] [bold]{len(failed)}[/bold] failed:")
+            for entry in failed:
+                id_part  = f"id={entry['id']}" if "id" in entry else f"product_id={entry.get('product_id', '?')}"
+                err_console.print(f"  [dim]{id_part}[/dim]  {entry.get('error', 'unknown error')}")
 
     if failed:
-        console.print(f"\n[red]✗[/red] [bold]{len(failed)}[/bold] failed:")
-        for entry in failed:
-            id_part  = f"id={entry['id']}" if "id" in entry else f"product_id={entry.get('product_id', '?')}"
-            console.print(f"  [dim]{id_part}[/dim]  {entry.get('error', 'unknown error')}")
+        raise typer.Exit(1)

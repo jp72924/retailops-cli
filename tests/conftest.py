@@ -36,6 +36,41 @@ def clean_env(monkeypatch):
     yield
 
 
+# ── global CLI state hygiene ──────────────────────────────────────────────────
+
+
+_STATE_DEFAULTS = {
+    "profile":            None,
+    "output":             "table",
+    "yes":                False,
+    "verbose":            False,
+    "dry_run":            False,
+    "page_size":          25,
+    "page_size_explicit": False,
+}
+
+
+@pytest.fixture(autouse=True)
+def reset_cli_state():
+    """
+    Reset the process-global ``retailops_cli.state`` module around every test.
+
+    ``state`` is only ever written by the root Typer callback, so a test that
+    invokes the CLI with ``--dry-run`` leaves ``state.dry_run`` True for the
+    rest of the session. Since --dry-run is enforced inside client._send(),
+    that would make every later test driving RetailOpsClient directly
+    (test_client.py, test_pager.py) silently exit 0 instead of sending a
+    request — a green suite for the wrong reason.
+    """
+    from retailops_cli import state as _state
+
+    for name, value in _STATE_DEFAULTS.items():
+        setattr(_state, name, value)
+    yield
+    for name, value in _STATE_DEFAULTS.items():
+        setattr(_state, name, value)
+
+
 # ── tmp-config redirection ────────────────────────────────────────────────────
 
 

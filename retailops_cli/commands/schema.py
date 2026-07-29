@@ -48,7 +48,7 @@ def get_schema(
     except RetailOpsError as e:
         handle_error(e)
         return
-    except httpx.ConnectError as e:
+    except httpx.RequestError as e:
         handle_connection_error(e, get_profile(state.profile).base_url)
         return
 

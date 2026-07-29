@@ -148,7 +148,13 @@ def test_orders_list_passes_status_and_date_filters(cli_env, httpx_mock, tmp_con
 # ── bulk-ship partial-success ────────────────────────────────────────────────
 
 
-def test_bulk_ship_renders_partial_success(cli_env, httpx_mock, tmp_config):
+def test_bulk_ship_partial_failure_exits_nonzero(cli_env, httpx_mock, tmp_config):
+    """
+    A 200 body carrying a "failed" entry must not look like success.
+
+    The API returns 200 even when every item failed, so the exit code is the
+    only signal a calling script gets.
+    """
     httpx_mock.add_response(
         url=f"{BASE}/orders/bulk-transition/", method="POST",
         json={
@@ -165,9 +171,20 @@ def test_bulk_ship_renders_partial_success(cli_env, httpx_mock, tmp_config):
         "--output", "json", "orders", "bulk-ship",
         "--id", "1", "--id", "2", "--id", "99",
     ])
-    assert r.exit_code == 0, r.stdout
+    assert r.exit_code == 1, r.stdout
+    # json mode still renders the whole envelope; only the exit code changed.
+    assert "failed" in r.stdout
     body = json.loads(httpx_mock.get_request().content)
     assert body == {"order_ids": [1, 2, 99], "action": "ship"}
+
+
+def test_bulk_ship_all_succeeded_exits_zero(cli_env, httpx_mock, tmp_config):
+    httpx_mock.add_response(
+        url=f"{BASE}/orders/bulk-transition/", method="POST",
+        json={"succeeded": [{"id": 1, "status": "shipped"}], "failed": []},
+    )
+    r = runner.invoke(app, ["--output", "json", "orders", "bulk-ship", "--id", "1"])
+    assert r.exit_code == 0, r.stdout
 
 
 # ── refund requires confirmation ──────────────────────────────────────────────

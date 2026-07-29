@@ -7,6 +7,9 @@ Design notes:
 - Uses httpx.Client (synchronous) — no event-loop overhead in a CLI context.
 - Mirrors the path/param-cleaning conventions in the MCP server's async client.
 - Retries up to 3 times on 429 Too Many Requests, respecting Retry-After.
+- --dry-run is enforced here rather than in each command: _send() previews
+  every non-GET request and exits 0 before it leaves the process, so no
+  command can forget to honour the flag.
 - Verbose mode prints request/response lines to stderr via Rich (does not
   corrupt --output json / csv pipelines which go to stdout).
 - Raises RetailOpsError for all non-2xx responses.
@@ -20,9 +23,12 @@ import time
 from typing import Any
 
 import httpx
+import typer
 
+from . import state
 from .config import Profile
 from .errors import RetailOpsError, raise_for_status
+from .output import print_dry_run
 
 
 class RetailOpsClient:
@@ -102,6 +108,51 @@ class RetailOpsClient:
                 cleaned[key] = str(value)
         return cleaned
 
+    # ── --dry-run preview ─────────────────────────────────────────────────────
+
+    _SECRET_KEYS = frozenset({
+        "password", "new_password", "confirm_password", "old_password",
+        "token", "ocr_api_key",
+    })
+
+    @classmethod
+    def _redact(cls, body: dict) -> dict:
+        """Mask secret-bearing fields so --dry-run never echoes a credential."""
+        return {
+            k: ("***" if k in cls._SECRET_KEYS and v not in (None, "") else v)
+            for k, v in body.items()
+        }
+
+    @classmethod
+    def _preview_body(cls, kwargs: dict) -> dict | None:
+        """
+        Rebuild the payload --dry-run should display from the kwargs _send()
+        was about to hand to httpx.
+
+        The public methods have already applied _clean_body / _clean_form_data /
+        _clean_params, so this is exactly what would have gone on the wire —
+        not a hand-maintained parallel copy that can drift.
+
+          json=           the cleaned JSON body
+          data= + files=  form fields, plus "<field>: <filename>" per upload
+                          (the file handle is never read)
+          params=         nested under "params"
+          (none)          None — e.g. DELETE, rendered without a body block
+        """
+        preview: dict = {}
+        body = kwargs.get("json")
+        if isinstance(body, dict):
+            preview.update(cls._redact(body))
+        form = kwargs.get("data")
+        if isinstance(form, dict):
+            preview.update(cls._redact(form))
+        for field, spec in (kwargs.get("files") or {}).items():
+            preview[field] = spec[0] if isinstance(spec, (tuple, list)) else "<file>"
+        params = kwargs.get("params")
+        if params:
+            preview["params"] = cls._clean_params(params)
+        return preview or None
+
     def _log(self, method: str, path: str) -> None:
         if self._verbose:
             from rich.console import Console
@@ -117,7 +168,24 @@ class RetailOpsClient:
         """
         Execute an HTTP call with automatic retry on 429 (rate limit).
         Returns the final httpx.Response; raises RetailOpsError on non-2xx.
+
+        Under --dry-run every verb except GET is intercepted here: the planned
+        request is printed and typer.Exit(0) raised, so no caller ever receives
+        a fabricated response to unpack (orders.create, for one, subscripts the
+        result on the very next line).
+
+        Raising rather than returning is what makes this safe. typer.Exit is a
+        click.exceptions.Exit, which subclasses RuntimeError — so it passes
+        straight through every command's `except RetailOpsError` (a direct
+        Exception subclass) and `except httpx.RequestError`, and __exit__()
+        returns None so the context manager closes the pools without
+        swallowing it. Click's runner turns it into exit status 0.
         """
+        method = fn.__name__.upper()
+        if state.dry_run and method != "GET":
+            print_dry_run(method, path, self._preview_body(kwargs))
+            raise typer.Exit(0)
+
         last: httpx.Response | None = None
         for attempt in range(self._MAX_RETRIES):
             r = fn(path, **kwargs)
