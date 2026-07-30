@@ -31,9 +31,86 @@ jobs:
       - name: Build package
         run: python -m build
 
+      # action-gh-release does not read an annotated tag's message, so without
+      # an explicit body every release ships with empty notes. Pull them from
+      # the CHANGELOG section matching the tag instead.
+      - name: Extract release notes from CHANGELOG
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+          import sys
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = tag.removeprefix("v")
+          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+
+          # Capture from this version's "## <version>" heading up to the next
+          # one. '^## ' is line-anchored, so '### Breaking' subsections inside
+          # the section are kept rather than treated as the boundary.
+          match = re.search(
+              rf"^## {re.escape(version)}\b.*?\n(.*?)(?=^## |\Z)",
+              changelog,
+              re.S | re.M,
+          )
+          if match is None:
+              sys.exit(
+                  f"::error::CHANGELOG.md has no '## {version}' section for tag {tag}. "
+                  "Add the entry before tagging, or correct the tag."
+              )
+
+          notes = match.group(1).strip()
+          if not notes:
+              sys.exit(f"::error::The '## {version}' CHANGELOG section is empty.")
+
+          pathlib.Path("release-notes.md").write_text(notes + "\n", encoding="utf-8")
+          print(f"Extracted {len(notes)} characters for {version}.")
+          PY
+
+      # Guard against a tag that disagrees with the declared version, which
+      # would publish artifacts labelled differently from the release. The
+      # version lives in two hand-maintained places, so check both — that
+      # catches them drifting from each other as well as from the tag.
+      - name: Verify tag matches declared version
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+          import sys
+          import tomllib
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          expected = tag.removeprefix("v")
+
+          # Read the files rather than importlib.metadata: that reports what was
+          # installed, which for an editable install can predate a version bump.
+          pyproject = tomllib.loads(
+              pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
+          )["project"]["version"]
+
+          init_src = pathlib.Path("retailops_cli/__init__.py").read_text(encoding="utf-8")
+          init_match = re.search(r"""__version__\s*=\s*["']([^"']+)["']""", init_src)
+          if init_match is None:
+              sys.exit("::error::Could not find __version__ in retailops_cli/__init__.py")
+          dunder = init_match.group(1)
+
+          mismatches = {"pyproject.toml": pyproject, "__init__.py": dunder}
+          wrong = {k: v for k, v in mismatches.items() if v != expected}
+          if wrong:
+              detail = ", ".join(f"{k} says {v}" for k, v in wrong.items())
+              sys.exit(
+                  f"::error::Tag {tag} implies version {expected}, but {detail}. "
+                  "Bump the version or retag."
+              )
+          print(f"Tag {tag} matches pyproject.toml and __init__.py ({expected}).")
+          PY
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: release-notes.md
           files: |
             dist/*.whl
             dist/*.tar.gz
