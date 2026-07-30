@@ -1477,9 +1477,13 @@ The allowlist that verified mobile-payment and bank-transfer receipts are matche
 | Add a bank-transfer recipient | `retailops-cli recipient-profiles create --method bank_transfer --account-number 01020304050607080910 --bank Banesco --document-id V12345678` |
 | Rename a profile | `retailops-cli recipient-profiles update 3 --label "Main line"` |
 | Take a profile out of matching | `retailops-cli recipient-profiles update 3 --inactive` |
+| Make a profile the primary for its method | `retailops-cli recipient-profiles update 3 --primary` |
+| List only the primary profiles | `retailops-cli recipient-profiles list --primary` |
 | Delete a profile | `retailops-cli recipient-profiles delete 3` |
 
 > **Note:** To stop matching against a recipient without losing the record, prefer `--inactive` over `delete`.
+>
+> **Note:** Each payment method (mobile-payment, bank-transfer) can have at most one primary profile — the one customer-facing systems show when several are registered. `--primary` swaps it in one step: whichever profile currently holds it for that method is un-marked automatically. A method's only profile is always primary, without you having to say so — `--primary`/`--no-primary` only matters once a second profile exists. Deleting the primary while others remain does **not** pick a new one for you; that method is left with none until you set one explicitly.
 
 ### System settings *(Manager)*
 
@@ -1503,6 +1507,7 @@ The allowlist that verified mobile-payment and bank-transfer receipts are matche
 |---|---|
 | Kiosk heartbeat | `retailops-cli kiosk heartbeat --kiosk-key KEY` |
 | Kiosk product lookup | `retailops-cli kiosk product-lookup SKU` |
+| Where to send a customer's payment | `retailops-cli kiosk recipient-profiles --kiosk-key KEY` |
 | Kiosk checkout | `retailops-cli kiosk checkout --customer-id ID --items JSON --payment-reference REF` |
 | Download OpenAPI schema | `retailops-cli schema get --format yaml` |
 | Show Swagger URL | `retailops-cli schema swagger-url` |

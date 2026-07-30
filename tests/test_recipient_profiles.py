@@ -56,6 +56,16 @@ def test_list_passes_filters_and_pagination(cli_env, httpx_mock, tmp_config):
     assert qs["search"] == "BDV"
 
 
+def test_list_filters_by_primary(cli_env, httpx_mock, tmp_config):
+    httpx_mock.add_response(
+        url=f"{BASE}/{PATH}/?is_primary=true&page=1&page_size=25",
+        json={"count": 0, "next": None, "previous": None, "results": []},
+    )
+    r = runner.invoke(app, ["recipient-profiles", "list", "--primary"])
+    assert r.exit_code == 0, r.stdout
+    assert dict(httpx_mock.get_request().url.params)["is_primary"] == "true"
+
+
 def test_list_rejects_an_unknown_method_before_sending(cli_env, httpx_mock, tmp_config):
     r = runner.invoke(app, ["recipient-profiles", "list", "--method", "carrier_pigeon"])
     assert r.exit_code == 1
@@ -102,6 +112,7 @@ def test_create_mobile_payment_profile(cli_env, httpx_mock, tmp_config):
         "phone":          "04121234567",
         "label":          "Main line",
         "is_active":      True,
+        "is_primary":     False,
     }
     # account_number was never supplied, so it must not appear in the payload.
     assert "account_number" not in body
@@ -121,6 +132,24 @@ def test_create_bank_transfer_profile(cli_env, httpx_mock, tmp_config):
     body = json.loads(httpx_mock.get_request().content)
     assert body["account_number"] == "01020304050607080910"
     assert body["is_active"] is False
+    # --primary was never passed, so the default (False) still goes on the
+    # wire — the server promotes a lone profile to primary regardless.
+    assert body["is_primary"] is False
+
+
+def test_create_with_primary_flag(cli_env, httpx_mock, tmp_config):
+    httpx_mock.add_response(
+        url=f"{BASE}/{PATH}/", method="POST", status_code=201,
+        json={"id": 5, "payment_method": "mobile_payment", "is_primary": True},
+    )
+    r = runner.invoke(app, [
+        "recipient-profiles", "create",
+        "--method", "mobile_payment", "--phone", "04121234567",
+        "--bank", "BDV", "--document-id", "V1", "--primary",
+    ])
+    assert r.exit_code == 0, r.stdout
+    body = json.loads(httpx_mock.get_request().content)
+    assert body["is_primary"] is True
 
 
 def test_create_surfaces_the_servers_pairing_rule(cli_env, httpx_mock, tmp_config):
@@ -172,6 +201,50 @@ def test_deactivating_keeps_the_record(cli_env, httpx_mock, tmp_config):
     r = runner.invoke(app, ["recipient-profiles", "update", "3", "--inactive"])
     assert r.exit_code == 0, r.stdout
     assert json.loads(httpx_mock.get_request().content) == {"is_active": False}
+
+
+def test_update_with_primary_flag_sends_only_that_field(cli_env, httpx_mock, tmp_config):
+    """
+    --primary alone must PATCH only is_primary — the server does the demote
+    of whichever other profile held it, in the same request.
+    """
+    httpx_mock.add_response(
+        url=f"{BASE}/{PATH}/3/", method="PATCH",
+        json={"id": 3, "is_primary": True},
+    )
+    r = runner.invoke(app, ["recipient-profiles", "update", "3", "--primary"])
+    assert r.exit_code == 0, r.stdout
+    assert json.loads(httpx_mock.get_request().content) == {"is_primary": True}
+
+
+def test_update_can_explicitly_unset_primary(cli_env, httpx_mock, tmp_config):
+    """--no-primary is a legitimate call even with no replacement chosen."""
+    httpx_mock.add_response(
+        url=f"{BASE}/{PATH}/3/", method="PATCH",
+        json={"id": 3, "is_primary": False},
+    )
+    r = runner.invoke(app, ["recipient-profiles", "update", "3", "--no-primary"])
+    assert r.exit_code == 0, r.stdout
+    assert json.loads(httpx_mock.get_request().content) == {"is_primary": False}
+
+
+def test_update_response_with_is_primary_renders_without_explicit_columns(
+    cli_env, httpx_mock, tmp_config, capsys,
+):
+    """
+    get/create/update render the full response object with no column
+    allowlist, so a field the server just started returning — is_primary —
+    must show up on its own with no output.py change required.
+    """
+    httpx_mock.add_response(
+        url=f"{BASE}/{PATH}/3/", method="PATCH",
+        json={"id": 3, "label": "Main line", "is_primary": True},
+    )
+    r = runner.invoke(app, [
+        "--output", "json", "recipient-profiles", "update", "3", "--primary",
+    ])
+    assert r.exit_code == 0, r.stdout
+    assert json.loads(r.stdout)["is_primary"] is True
 
 
 def test_delete_prompts_before_removing(cli_env, httpx_mock, tmp_config):

@@ -2,16 +2,29 @@
 commands/recipient_profiles.py
 ------------------------------
   retailops-cli recipient-profiles list   [--method METHOD] [--active/--inactive]
+                                          [--primary/--no-primary]
                                           [--search TEXT] [--ordering FIELD] [--page N] [--all]
   retailops-cli recipient-profiles get    <id>
   retailops-cli recipient-profiles create --method METHOD --bank BANK --document-id ID
                                           [--phone PHONE] [--account-number NUM] [--label TEXT]
-  retailops-cli recipient-profiles update <id> [field flags]
+                                          [--primary/--no-primary]
+  retailops-cli recipient-profiles update <id> [field flags] [--primary/--no-primary]
   retailops-cli recipient-profiles delete <id>
 
 Recipient profiles are the allowlist that OCR-verified mobile-payment and
 bank-transfer receipts are matched against. A receipt only matches when the
 identifying field, the bank, and the document ID all agree.
+
+At most one profile per payment method may be primary — the one customer-
+facing systems (the kiosk, for one) show when several are registered.
+--primary on create or update auto-demotes whichever other profile of the
+same method currently holds it, in the same request; there is no separate
+unset step. A method's only profile is always its primary one, applied by
+the server automatically on create and again if a delete leaves one behind
+— --primary only needs passing once a method has two or more profiles.
+Deleting the primary while others remain does not auto-promote a
+replacement: zero primaries is a valid, unforced state until someone picks
+one with update --primary.
 
 Permissions: Manager+ for every operation, including list and get — these
 records carry bank-account and document identifiers used for fraud control,
@@ -39,7 +52,7 @@ _METHODS = ("mobile_payment", "bank_transfer")
 
 _COLUMNS = [
     "id", "label", "payment_method", "bank",
-    "phone", "account_number", "is_active", "created_at",
+    "phone", "account_number", "is_active", "is_primary", "created_at",
 ]
 
 
@@ -65,6 +78,8 @@ def list_profiles(
                                              help="mobile_payment | bank_transfer"),
     active:   Optional[bool] = typer.Option(None,  "--active/--inactive",
                                              help="Filter by active state."),
+    primary:  Optional[bool] = typer.Option(None,  "--primary/--no-primary",
+                                             help="Filter by primary status for its payment method."),
     search:   Optional[str]  = typer.Option(None,  "--search",   "-s",
                                              help="Search label, phone, account number, bank, document ID."),
     ordering: Optional[str]  = typer.Option(None,  "--ordering", "-O",
@@ -79,6 +94,7 @@ def list_profiles(
     params = {
         "payment_method": method,
         "is_active":      active,
+        "is_primary":     primary,
         "search":         search,
         "ordering":       ordering,
     }
@@ -133,6 +149,9 @@ def create(
     label:          Optional[str] = typer.Option(None, "--label",          "-l",
                                                   help="Human-friendly name for this profile."),
     active:         bool          = typer.Option(True, "--active/--inactive"),
+    primary:        bool          = typer.Option(False, "--primary/--no-primary",
+                                                  help="Make this the primary profile for --method. "
+                                                       "Automatic when it's the method's only profile."),
     output:         Optional[str] = typer.Option(None, "--output",         "-o"),
 ) -> None:
     """
@@ -141,6 +160,10 @@ def create(
     Which identifier you supply depends on the method: mobile_payment needs
     --phone and rejects --account-number; bank_transfer needs --account-number
     and rejects --phone. The server enforces this pairing.
+
+    If this is the only profile for --method, the server marks it primary
+    regardless of --primary/--no-primary. Once a second profile exists for
+    the same method, --primary auto-demotes whichever one currently holds it.
 
     \b
     Example:
@@ -159,6 +182,7 @@ def create(
                 "account_number": account_number,
                 "label":          label,
                 "is_active":      active,
+                "is_primary":     primary,
             })
     except RetailOpsError as e:
         handle_error(e)
@@ -183,16 +207,25 @@ def update(
     account_number: Optional[str]  = typer.Option(None, "--account-number"),
     label:          Optional[str]  = typer.Option(None, "--label",          "-l"),
     active:         Optional[bool] = typer.Option(None, "--active/--inactive"),
+    primary:        Optional[bool] = typer.Option(None, "--primary/--no-primary",
+                                                   help="--primary auto-demotes whichever other "
+                                                        "profile of the same payment method "
+                                                        "currently holds it."),
     output:         Optional[str]  = typer.Option(None, "--output",         "-o"),
 ) -> None:
-    """Update a recipient profile. Requires Manager role. Only supplied flags are sent."""
+    """
+    Update a recipient profile. Requires Manager role. Only supplied flags are sent.
+
+    --no-primary on the current primary is allowed and leaves the method with
+    zero primaries if others remain — nothing is auto-promoted in its place.
+    """
     _check_method(method)
     body: dict = {}
     for key, val in [
         ("payment_method", method),      ("bank",       bank),
         ("document_id",    document_id), ("phone",      phone),
         ("account_number", account_number), ("label",   label),
-        ("is_active",      active),
+        ("is_active",      active),      ("is_primary", primary),
     ]:
         if val is not None:
             body[key] = val
@@ -224,6 +257,11 @@ def delete(
 
     Receipts will stop matching against it immediately. To keep the record but
     take it out of matching, use --inactive on update instead.
+
+    If this was the method's only remaining profile, deleting it leaves that
+    method with none — nothing is auto-promoted. If it was the primary among
+    several, the method is left with zero primaries until you set one with
+    update --primary.
     """
     confirm_or_abort(f"Delete recipient profile {id}? Receipts will no longer match it.")
     try:

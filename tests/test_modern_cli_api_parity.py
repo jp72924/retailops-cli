@@ -192,6 +192,26 @@ def test_settings_clear_ocr_api_key_is_explicit(cli_env, httpx_mock, tmp_config)
     assert json.loads(httpx_mock.get_request().content) == {"ocr_api_key": ""}
 
 
+def test_kiosk_recipient_profiles_uses_kiosk_key(cli_env, httpx_mock, tmp_config):
+    """
+    Reaches the same GET /kiosk/recipient-profiles/ a station key authenticates
+    against, via the CLI's existing kiosk auth path — not the Manager-only
+    recipient-profiles group, which uses a user token.
+    """
+    httpx_mock.add_response(
+        url=f"{BASE}/kiosk/recipient-profiles/",
+        json={"results": [
+            {"payment_method": "mobile_payment", "payment_method_display": "Mobile Payment",
+             "bank": "BDV", "phone": "04121234567", "account_number": "", "document_id": "V123"},
+        ]},
+    )
+
+    r = runner.invoke(app, ["kiosk", "recipient-profiles"])
+
+    assert r.exit_code == 0, r.stdout
+    assert httpx_mock.get_request().headers["Authorization"] == f"KioskKey {KIOSK_KEY}"
+
+
 def test_kiosk_heartbeat_uses_kiosk_key(cli_env, httpx_mock, tmp_config):
     httpx_mock.add_response(
         url=f"{BASE}/kiosk/heartbeat/",
