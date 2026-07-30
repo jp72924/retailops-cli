@@ -141,6 +141,7 @@ def test_group_help_does_not_crash(group):
     ["kiosk", "identify", "--help"],
     ["kiosk", "register", "--help"],
     ["kiosk", "products", "--help"],
+    ["kiosk", "recipient-profiles", "--help"],
     ["kiosk", "product-get", "--help"],
     ["kiosk", "product-lookup", "--help"],
     ["kiosk", "checkout", "--help"],

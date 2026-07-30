@@ -136,6 +136,32 @@ def products(
     render(data, fmt, columns=["id", "sku", "name", "unit_price", "current_stock", "image_url"])
 
 
+@app.command(name="recipient-profiles")
+def recipient_profiles(
+    kiosk_key: Optional[str] = typer.Option(None, "--kiosk-key", envvar="RETAILOPS_KIOSK_API_KEY"),
+    output: Optional[str] = typer.Option(None, "--output", "-o"),
+) -> None:
+    """
+    Show where to send payment for each active method.
+
+    Returns the primary recipient profile per payment method — at most one
+    entry each for mobile_payment and bank_transfer, fewer if a method has
+    no active primary configured. This is the same allowlist checkout
+    validates receipts against, so what's shown here is what will match.
+    """
+    fmt = output or state.output
+    try:
+        with _kiosk_client(kiosk_key) as client:
+            data = client.get("kiosk/recipient-profiles/")
+    except RetailOpsError as e:
+        handle_error(e)
+        return
+    except httpx.RequestError as e:
+        _handle_connection(e)
+        return
+    render(data, fmt, columns=["payment_method", "bank", "phone", "account_number", "document_id"])
+
+
 @app.command(name="product-get")
 def product_get(
     id: int = typer.Argument(..., help="Product ID."),

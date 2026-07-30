@@ -6,19 +6,21 @@ disagree.
 Compiled from a full read of both repositories — every row below was checked against the
 view, serializer, filter, and command source, not against either side's documentation.
 
-**Status as of 0.2.0: closed.** All in-scope operations are reachable and all six
-behavioral disparities are resolved. The audit that produced this document is preserved
-below, with each finding marked and dated, because the reasoning is worth keeping even
-though the defects are gone.
+**Status: current.** The 0.2.0 audit closed all six disparities it found and reached
+100% of the in-scope surface that existed at the time. The API has since grown — a
+new `is_primary` flag on recipient profiles, and a new kiosk-scoped endpoint for it —
+and picked up one previously-undetected disparity (`reference_number`, below) along
+the way. This document tracks that growth rather than staying pinned to the release
+that closed the original audit.
 
-| | Audit (0.1.0) | Now (0.2.0) |
+| | Audit (0.1.0) | Current |
 |---|---|---|
-| API operations | 78 | 78 |
+| API operations | 78 | 79 |
 | Deliberate non-goals | — | 8 |
-| In-scope operations | 70 | 70 |
-| Reachable | **64 (91%)** | **70 (100%)** |
-| CLI commands | 71 | 78 |
-| Behavioral disparities | 6 | **0** |
+| In-scope operations | 70 | 71 |
+| Reachable | **64 (91%)** | **71 (100%)** |
+| CLI commands | 71 | 79 |
+| Behavioral disparities | 6 | **1**, deliberately left open |
 
 **Counting rule:** one HTTP operation per row. A command counts as reaching an operation
 only if it actually issues that request.
@@ -36,6 +38,26 @@ Eight of the 78 operations are intentionally not exposed. These are decisions, n
 |---|---|
 | `PUT` on users, customers, categories, products, orders, recipient profiles (6) | `PATCH` already covers every writable field. For orders it is doubly redundant — `PATCH` replaces all line items wholesale. A full-replace command would differ from `update` only in ways users would trip on. `client.put()` remains implemented and tested against the day this changes. |
 | `GET /schema/swagger/`, `GET /schema/redoc/` (2) | Browser HTML, not machine-readable. `schema swagger-url` and `schema redoc-url` print the addresses; `schema get` fetches the OpenAPI document itself. |
+
+---
+
+## Open disparities
+
+One gap, found after the 0.2.0 audit closed, left unresolved by decision rather than oversight.
+
+### `reference_number` is required by the back-office, not by the API, MCP, or CLI
+
+`core/views.py`'s `payment_create` rejects a `bank_transfer`, `card`, or `check` payment with
+no `reference_number` — added in `d1e4467` (2026-07-28) alongside unrelated MCP-doc fixes.
+`api/serializers/payment.py` has no equivalent check: `reference_number` is accepted, blank or
+not, by the API, and therefore by MCP and by `retailops-cli payments record --ref` too.
+
+**Left open deliberately.** Lifting the check into `PaymentSerializer.validate()` would close
+it everywhere at once, but it is a behavior change to a surface with callers this repo cannot
+see — any existing API or MCP integration recording one of those three payment methods without
+a reference number would start getting a 400 it doesn't get today. Enforcing it needs an audit
+of who is calling first, not a CLI-side workaround; the CLI has no way to require something the
+API itself accepts.
 
 ---
 
@@ -208,6 +230,11 @@ including list and get — these carry bank-account and document identifiers.
 - `--method` and `--active` filter server-side; `filterset_fields` was added to the
   viewset in 0.2.0, without which those flags would have been silently inert.
 - `--inactive` on update takes a profile out of matching without losing the record.
+- `is_primary` — one primary per `payment_method`, enforced by a partial unique
+  index. `create`/`update` expose `--primary`/`--no-primary`; `list` filters on
+  `?is_primary=`. Auto-demote and auto-assign are server behavior the CLI only
+  needs to explain, not implement — documented in the command's own `--help`
+  rather than repeated here. No new API operation, so the row count is unchanged.
 
 ## Settings — 3/3
 
@@ -238,7 +265,7 @@ including list and get — these carry bank-account and document identifiers.
 - `schema get` writes YAML or JSON straight to stdout.
 - The MCP skill card endpoint is public and needs no token.
 
-## Kiosk — 8/8
+## Kiosk — 9/9
 
 | Capability | API | CLI | Reachable |
 |---|---|---|---|
@@ -247,6 +274,7 @@ including list and get — these carry bank-account and document identifiers.
 | Search products | `GET kiosk/products/` | `kiosk products` | Yes |
 | Get a product by ID | `GET kiosk/products/{id}/` | `kiosk product-get` | Yes |
 | Look up a product by SKU | `GET kiosk/product/{sku}/` | `kiosk product-lookup` | Yes |
+| Primary recipient profile per method | `GET kiosk/recipient-profiles/` | `kiosk recipient-profiles` | Yes |
 | Checkout | `POST kiosk/checkout/` | `kiosk checkout` | Yes |
 | Fetch a receipt | `GET kiosk/receipt/{order_id}/` | `kiosk receipt` | Yes |
 | Heartbeat | `POST kiosk/heartbeat/` | `kiosk heartbeat` | Yes |
@@ -257,6 +285,11 @@ including list and get — these carry bank-account and document identifiers.
   are correct rather than a gap.
 - Checkout is one atomic server transaction: order, stock, payment, delivery.
 - Receipt fetch is scoped to the station's own orders.
+- `kiosk recipient-profiles` reuses the same `KioskKey` client as every other command here —
+  it does not need, and cannot use, a user token. The Manager-only `recipient-profiles` group
+  (above) is a separate command group entirely; this row is not that group reused, it is the
+  narrow, kiosk-scoped endpoint that returns only what a shopper needs on screen: bank,
+  identifier, and document, one entry per method, primary-only.
 
 ---
 
@@ -276,10 +309,12 @@ behaviors exist only on the client.
 
 ---
 
-## Where the CLI and the server disagreed
+## Resolved disparities (0.2.0 audit)
 
 All six are resolved in 0.2.0. The findings are kept as written at audit time — each is
 followed by a note on how it was closed, so the reasoning survives alongside the fix.
+The `reference_number` gap above was found later and is tracked separately, since it
+was left open rather than closed.
 
 ### 1. `--dry-run` is honored by 8 of 45 mutating commands — data loss
 
