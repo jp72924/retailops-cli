@@ -8,9 +8,10 @@ view, serializer, filter, and command source, not against either side's document
 
 **Status: current.** The 0.2.0 audit closed all six disparities it found and reached
 100% of the in-scope surface that existed at the time. The API has since grown — a
-new `is_primary` flag on recipient profiles, and a new kiosk-scoped endpoint for it —
-and picked up one previously-undetected disparity (`reference_number`, below) along
-the way. This document tracks that growth rather than staying pinned to the release
+new `is_primary` flag on recipient profiles, and a new kiosk-scoped endpoint for it.
+A seventh disparity (`reference_number`) surfaced along the way and was left open for
+a while before being closed; both it and the reasoning for the delay are recorded
+below. This document tracks that growth rather than staying pinned to the release
 that closed the original audit.
 
 | | Audit (0.1.0) | Current |
@@ -20,7 +21,7 @@ that closed the original audit.
 | In-scope operations | 70 | 71 |
 | Reachable | **64 (91%)** | **71 (100%)** |
 | CLI commands | 71 | 79 |
-| Behavioral disparities | 6 | **1**, deliberately left open |
+| Behavioral disparities | 6 | **0** |
 
 **Counting rule:** one HTTP operation per row. A command counts as reaching an operation
 only if it actually issues that request.
@@ -43,21 +44,44 @@ Eight of the 78 operations are intentionally not exposed. These are decisions, n
 
 ## Open disparities
 
-One gap, found after the 0.2.0 audit closed, left unresolved by decision rather than oversight.
+**None.**
 
-### `reference_number` is required by the back-office, not by the API, MCP, or CLI
+The one that was open — `reference_number` — is now closed. It is kept below with its
+original reasoning, because *why it stayed open for a while* is the more useful record.
+
+### ~~`reference_number` is required by the back-office, not by the API, MCP, or CLI~~ — resolved
 
 `core/views.py`'s `payment_create` rejects a `bank_transfer`, `card`, or `check` payment with
 no `reference_number` — added in `d1e4467` (2026-07-28) alongside unrelated MCP-doc fixes.
-`api/serializers/payment.py` has no equivalent check: `reference_number` is accepted, blank or
+`api/serializers/payment.py` had no equivalent check: `reference_number` was accepted, blank or
 not, by the API, and therefore by MCP and by `retailops-cli payments record --ref` too.
 
-**Left open deliberately.** Lifting the check into `PaymentSerializer.validate()` would close
-it everywhere at once, but it is a behavior change to a surface with callers this repo cannot
-see — any existing API or MCP integration recording one of those three payment methods without
-a reference number would start getting a 400 it doesn't get today. Enforcing it needs an audit
-of who is calling first, not a CLI-side workaround; the CLI has no way to require something the
-API itself accepts.
+**Originally left open deliberately.** Lifting the check into `PaymentSerializer.validate()`
+closes it everywhere at once, but it is a behavior change to a surface with callers this repo
+cannot see — any existing API or MCP integration recording one of those three payment methods
+without a reference number starts getting a 400 it did not get before.
+
+> **Resolved.** `REFERENCE_REQUIRED_PAYMENT_METHODS` added to `PaymentSerializer`, with the
+> break accepted knowingly rather than dodged. Three things came out of doing it that the
+> original note didn't anticipate:
+>
+> - **The rule stacks with the OCR requirement** rather than replacing it. A `bank_transfer`
+>   under OCR needs both a bank reference *and* a `transaction_key` — different identifiers.
+>   `validate()` now collects missing-field errors and raises once so a caller sees both,
+>   instead of fixing one and rediscovering the other. `bank_transfer` is the only method that
+>   can reach more than one error.
+> - **The kiosk bypassed it twice over.** Kiosk builds `Payment` directly, and its reference
+>   derivation stripped the result of an `or` rather than each candidate — so a whitespace-only
+>   `receipt.reference` won the `or` and collapsed to `''`, storing exactly the blank the rule
+>   forbids, for `card`, the kiosk default. The same expression raised `AttributeError` on a
+>   non-string value, surfacing as a 500. Both fixed.
+> - **The back-office rule being propagated had no test at all.** It has one now.
+>
+> The CLI mirrors the rule client-side so `payments record` fails before the round-trip. That
+> duplicates a server rule, which this document elsewhere argues against — the distinction is
+> that this is a static method-to-field mapping like the existing `_METHODS` whitelist, not a
+> conditional rule depending on server state. The constant carries a comment naming its
+> server-side counterpart so the coupling is visible.
 
 ---
 
@@ -212,6 +236,8 @@ Renders a bespoke summary panel rather than the generic table.
 - Every OCR field is exposed on record: transaction key, receipt image, OCR payload.
 - Payments are immutable once created — no update path exists on any surface, by design.
 - `verify-receipt` requires an order or an expected amount; the CLI checks that first.
+- `record` requires `--ref` for `bank_transfer`, `card`, and `check`, and checks that
+  before sending — mirroring the server rule rather than waiting for its 400.
 
 ## Recipient profiles — 5/5
 
@@ -314,7 +340,7 @@ behaviors exist only on the client.
 All six are resolved in 0.2.0. The findings are kept as written at audit time — each is
 followed by a note on how it was closed, so the reasoning survives alongside the fix.
 The `reference_number` gap above was found later and is tracked separately, since it
-was left open rather than closed.
+stayed open for a while before being closed.
 
 ### 1. `--dry-run` is honored by 8 of 45 mutating commands — data loss
 

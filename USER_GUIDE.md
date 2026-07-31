@@ -643,10 +643,12 @@ retailops-cli orders confirm 88
 Once an order is Confirmed, you can record a payment against it.
 
 ```
-retailops-cli payments record --order 88 --amount 89.97 --method bank_transfer
+retailops-cli payments record --order 88 --amount 89.97 --method bank_transfer --ref TXN-98765
 ```
 
-Available payment methods: `cash` · `bank_transfer` · `card` · `check` · `other`
+Available payment methods: `cash` · `mobile_payment` · `bank_transfer` · `card` · `check` · `other`
+
+> **Note:** `--ref` (the bank's or card processor's own transaction reference) is **required** for `bank_transfer`, `card`, and `check`. The command stops with an error before contacting the server if you leave it out. It stays optional for `cash`, `mobile_payment`, and `other`.
 
 ```
 ✓ Payment of 89.97 recorded for order 88 (method=bank_transfer).
@@ -1450,6 +1452,7 @@ Cut out or print this page for quick access to the most common commands.
 | Task | Command |
 |---|---|
 | Record a payment | `retailops-cli payments record --order ID --amount AMOUNT --method METHOD` |
+| Record a bank transfer, card, or check | `retailops-cli payments record --order ID --amount AMOUNT --method bank_transfer --ref REFERENCE` *(`--ref` required)* |
 | View payments for an order | `retailops-cli payments list --order ID` |
 | Verify a receipt through OCR | `retailops-cli payments verify-receipt --image path.jpg --method mobile_payment --expected-amount-usd AMOUNT` |
 | Check OCR provider health | `retailops-cli payments receipt-healthz` |
