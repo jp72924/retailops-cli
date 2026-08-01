@@ -6,6 +6,9 @@ commands/payments.py
   retailops-cli payments get    <id>
   retailops-cli payments record --order INT --amount STR --method METHOD [--ref TEXT] [--notes TEXT]
 
+--ref is required for bank_transfer, card, and check payments, and optional
+for cash, mobile_payment, and other.
+
 Payments are immutable financial records — no update or delete.
 Permissions: any authenticated user.
 """
@@ -29,6 +32,10 @@ app = typer.Typer(no_args_is_help=True)
 
 _METHODS = ["cash", "mobile_payment", "bank_transfer", "card", "check", "other"]
 _RECEIPT_METHODS = ["mobile_payment", "bank_transfer"]
+# Mirrors REFERENCE_REQUIRED_PAYMENT_METHODS in the server's
+# api/serializers/payment.py. Duplicated here only to fail fast; if the server
+# set ever changes, this one has to follow.
+_REFERENCE_REQUIRED_METHODS = ["bank_transfer", "card", "check"]
 
 
 def _client():
@@ -116,7 +123,9 @@ def record(
     method: str           = typer.Option(...,  "--method", "-m",
                                           prompt=True,
                                           help="cash | mobile_payment | bank_transfer | card | check | other"),
-    ref:    Optional[str] = typer.Option(None, "--ref",          help="External transaction reference."),
+    ref:    Optional[str] = typer.Option(None, "--ref",
+                                          help="External transaction reference. "
+                                               "Required for bank_transfer, card, and check."),
     status_: Optional[str] = typer.Option(None, "--status", help="confirmed | pending_review"),
     transaction_key: Optional[str] = typer.Option(None, "--transaction-key", help="Verified receipt transaction key."),
     origin_phone: Optional[str] = typer.Option(None, "--origin-phone"),
@@ -133,12 +142,23 @@ def record(
 
     If the running total meets or exceeds the order total, the order
     automatically transitions to Paid.
+
+    --ref is required for bank_transfer, card, and check payments; the server
+    rejects those without one.
     """
     if method not in _METHODS:
         from ..errors import err_console
         err_console.print(
             f"[red]Invalid payment method '{method}'.[/red] "
             f"Choose from: {', '.join(_METHODS)}"
+        )
+        raise typer.Exit(1)
+
+    if method in _REFERENCE_REQUIRED_METHODS and not (ref or "").strip():
+        from ..errors import err_console
+        err_console.print(
+            f"[red]--ref is required for {method} payments.[/red] "
+            f"Also required for: {', '.join(m for m in _REFERENCE_REQUIRED_METHODS if m != method)}."
         )
         raise typer.Exit(1)
 
