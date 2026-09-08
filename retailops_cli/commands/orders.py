@@ -161,7 +161,9 @@ def create(
     Create a Draft sales order.
 
     Line items are supplied as a JSON array via --items.
-    Each item requires product_id and quantity; unit_price is optional.
+    Each item requires product_id and quantity. Prices are server-derived from
+    the product catalogue -- sending unit_price is rejected with a 400. A product
+    may appear only once per order; use quantity to order more than one.
 
     \b
     Example:
