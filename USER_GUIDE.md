@@ -573,10 +573,13 @@ You should see:
 
 The order has been created with ID **88** and is in **Draft** status. Nothing has been committed yet — you can still make changes.
 
-> **Tip — Specifying a custom price:** By default, the order uses the product's current listed price. To override the price for a specific line item, add `"unit_price": "25.00"` inside that item's braces:
+> **Note — Prices come from the product list:** Each line is charged at the product's current listed price, and an order cannot change it. Adding `"unit_price"` to an item is rejected with a "Validation failed" message. If you need to charge less, give the whole order a discount instead:
 > ```
-> [{"product_id": 5, "quantity": 3, "unit_price": "25.00"}]
+> retailops-cli orders create --customer-id 12 --items '[{"product_id": 5, "quantity": 3}]' --discount "10.00"
 > ```
+> If the listed price itself is wrong, a Manager can change it first — see [Updating a product](#updating-a-product-manager-access-required).
+>
+> Each product can appear only once in the list. To order more than one, raise its `quantity` rather than adding a second line.
 
 > **Tip — Loading items from a file:** Long item lists can be awkward to type on a single line. You can put them in a text file (for example `order-items.json`) and reference the file with `@`:
 > ```
