@@ -25,7 +25,7 @@ A step-by-step guide for daily users. No technical background required.
    - [Looking Up a Customer](#64-looking-up-a-customer)
 7. [Common Tasks](#7-common-tasks)
    - Adding / updating / deleting customers
-   - [Viewing or changing system currency settings](#viewing-or-changing-system-currency-settings-manager-access-required)
+   - [Viewing or changing system settings](#viewing-or-changing-system-settings-manager-access-required)
    - [Checking your configuration](#checking-your-configuration)
    - [Previewing a command before running it](#previewing-a-command-before-running-it)
    - [Resetting a forgotten password](#resetting-a-forgotten-password)
