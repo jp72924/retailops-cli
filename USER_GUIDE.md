@@ -1045,6 +1045,8 @@ You will see something like:
 retailops-cli settings update --currency-code EUR --currency-symbol "€" --decimal-places 2
 ```
 
+> **Note — Only before the first sale:** The currency code can be changed only while there are no orders or payments. After that, the server rejects `--currency-code` with a "Validation failed" message. Every price and amount is stored as a plain number in the primary currency, so switching USD to EUR would turn a $10 product into €10 without converting anything. The symbol, the decimal places, and everything about the secondary currency can still be changed at any time.
+
 **Enable a secondary currency** (e.g. show Bolívares alongside US Dollars at a fixed rate):
 
 ```
@@ -1493,7 +1495,7 @@ The allowlist that verified mobile-payment and bank-transfer receipts are matche
 | Task | Command |
 |---|---|
 | View current settings | `retailops-cli settings get` |
-| Change primary currency | `retailops-cli settings update --currency-code EUR --currency-symbol "€"` |
+| Change primary currency (before the first order or payment) | `retailops-cli settings update --currency-code EUR --currency-symbol "€"` |
 | Enable secondary currency | `retailops-cli settings update --secondary-enabled --secondary-code VES --secondary-symbol "Bs." --secondary-rate 36.50` |
 | Update the exchange rate only | `retailops-cli settings update --secondary-rate 38.10` |
 | Fetch the exchange rate from its source | `retailops-cli settings refresh-rate` |

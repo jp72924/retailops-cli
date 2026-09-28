@@ -63,7 +63,8 @@ def get(
 @app.command()
 def update(
     currency_code:   Optional[str]  = typer.Option(None, "--currency-code",
-                                                    help="ISO 4217 code, e.g. USD, EUR, GBP."),
+                                                    help="ISO 4217 code, e.g. USD, EUR, GBP. "
+                                                         "Rejected once any order or payment exists."),
     currency_symbol: Optional[str]  = typer.Option(None, "--currency-symbol",
                                                     help="Display symbol, e.g. $, €, £."),
     decimal_places:  Optional[int]  = typer.Option(None, "--decimal-places",
@@ -131,7 +132,11 @@ def update(
     supported. Only flags you supply are sent.
 
     \b
-    Note:
+    Notes:
+      --currency-code is rejected once any order or payment exists. Stored
+      amounts are plain numbers in the primary currency, so a new code would
+      re-label them without converting any. The symbol, the decimals and the
+      whole secondary currency stay editable.
       --recipient-validation is rejected unless at least one active recipient
       profile exists. Create one first with:
         retailops-cli recipient-profiles create --help
